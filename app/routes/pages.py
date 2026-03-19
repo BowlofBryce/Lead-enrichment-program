@@ -15,7 +15,7 @@ from app.models import CSVParseDiagnostic, EnrichmentRun, Lead, LeadDebugEvent
 from app.services.csv_utils import EXPECTED_COLUMNS, export_leads_to_csv, inspect_upload_csv, lead_to_export_row
 from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
-from app.services.ollama_client import check_ollama_health, generate_json
+from app.services.ollama_client import check_ollama_health, generate
 from app.settings import settings
 
 
@@ -119,6 +119,7 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
             "found_columns": [c for c in EXPECTED_COLUMNS if mapping.get(c)],
             "missing_columns": [c for c in EXPECTED_COLUMNS if not mapping.get(c)],
             "debug_mode": settings.debug_mode,
+            "form_values": {"prompt": prompt, "system": system, "temperature": temperature, "max_tokens": max_tokens, "expect_json": expect_json},
         },
     )
 
@@ -250,6 +251,13 @@ def llm_debug_page(request: Request):
             "ollama_base_url": settings.ollama_base_url,
             "ollama_model": settings.ollama_model,
             "debug_mode": settings.debug_mode,
+            "form_values": {
+                "prompt": "say hello",
+                "system": "",
+                "temperature": 0.1,
+                "max_tokens": 256,
+                "expect_json": False,
+            },
         },
     )
 
@@ -258,17 +266,24 @@ def llm_debug_page(request: Request):
 def llm_debug_test(
     request: Request,
     action: str = Form(...),
-    prompt: str = Form(default="Return JSON with {\"status\":\"ok\"}."),
+    prompt: str = Form(default="say hello"),
     system: str = Form(default=""),
     temperature: float = Form(default=0.1),
     max_tokens: int = Form(default=256),
+    expect_json: bool = Form(default=False),
 ):
     result: dict[str, object] = {}
     if action == "connection":
         result = {"type": "connection", "data": check_ollama_health()}
     else:
         start = time.perf_counter()
-        reply = generate_json(prompt=prompt, system=system, temperature=temperature, max_tokens=max_tokens)
+        reply = generate(
+            prompt=prompt,
+            system=system,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            expect_json=expect_json,
+        )
         duration_ms = int((time.perf_counter() - start) * 1000)
         result = {
             "type": "prompt",
@@ -279,6 +294,8 @@ def llm_debug_test(
             "parsed_response": reply.data,
             "parse_error": reply.parse_error,
             "request_payload": reply.request_payload,
+            "raw_payload": reply.raw_payload,
+            "expect_json": expect_json,
         }
     return templates.TemplateResponse(
         "debug_llm.html",
@@ -289,6 +306,7 @@ def llm_debug_test(
             "ollama_base_url": settings.ollama_base_url,
             "ollama_model": settings.ollama_model,
             "debug_mode": settings.debug_mode,
+            "form_values": {"prompt": prompt, "system": system, "temperature": temperature, "max_tokens": max_tokens, "expect_json": expect_json},
         },
     )
 
