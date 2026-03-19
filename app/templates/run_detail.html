@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Run #{{ run.id }}</h2>
+  <p><strong>File:</strong> {{ run.filename }}</p>
+  <p><strong>Status:</strong> <span class="status status-{{ run.status }}">{{ run.status }}</span></p>
+  <p><strong>Progress:</strong> {{ run.processed_rows }} / {{ run.total_rows }}</p>
+  {% if run.status == "pending" %}
+    <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Run</button></form>
+  {% endif %}
+  <a href="/runs/{{ run.id }}/export" class="button">Export Enriched CSV</a>
+</section>
+
+<section class="card">
+  <h2>Leads</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Company</th>
+        <th>Website</th>
+        <th>Status</th>
+        <th>Public Email</th>
+        <th>Business Type</th>
+        <th>Fit Score</th>
+        <th>Error</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for lead in run.leads %}
+      <tr>
+        <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
+        <td>{{ lead.original_company_name }}</td>
+        <td>{{ lead.original_website }}</td>
+        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></td>
+        <td>{{ lead.public_email or "" }}</td>
+        <td>{{ lead.business_type or "" }}</td>
+        <td>{{ lead.fit_score if lead.fit_score is not none else "" }}</td>
+        <td>{{ lead.enrichment_error or "" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
