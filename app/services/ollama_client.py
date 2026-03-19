@@ -63,6 +63,20 @@ def check_ollama_health() -> dict[str, Any]:
         out["error"] = str(exc)
         return out
 
+def check_ollama_health() -> dict[str, Any]:
+    out = {"reachable": False, "model_available": False, "error": "", "models": []}
+    try:
+        tags_resp = requests.get(f"{settings.ollama_base_url}/api/tags", timeout=8)
+        tags_resp.raise_for_status()
+        payload = tags_resp.json()
+        models = [m.get("name", "") for m in payload.get("models", [])]
+        out["reachable"] = True
+        out["models"] = models
+        out["model_available"] = any(m == settings.ollama_model or m.startswith(f"{settings.ollama_model}:") for m in models)
+        return out
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
 
 def generate(
     prompt: str,
