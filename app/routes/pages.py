@@ -119,7 +119,6 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
             "found_columns": [c for c in EXPECTED_COLUMNS if mapping.get(c)],
             "missing_columns": [c for c in EXPECTED_COLUMNS if not mapping.get(c)],
             "debug_mode": settings.debug_mode,
-            "form_values": {"prompt": prompt, "system": system, "temperature": temperature, "max_tokens": max_tokens, "expect_json": expect_json},
         },
     )
 
