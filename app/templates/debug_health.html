@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Health</h2>
+  <ul>
+    <li>App status: {{ app_status }}</li>
+    <li>DB status: {{ db_status }} {{ db_error }}</li>
+    <li>Ollama reachable: {{ ollama_health.reachable }}</li>
+    <li>Ollama model available: {{ ollama_health.model_available }}</li>
+    <li>Configured model: {{ ollama_model }}</li>
+    <li>Uploads dir writable/exists: {{ uploads_ok }}</li>
+    <li>Exports dir writable/exists: {{ exports_ok }}</li>
+    <li>Run count: {{ run_count }}</li>
+    <li>DEBUG_MODE: {{ debug_mode }}</li>
+  </ul>
+</section>
+{% endblock %}

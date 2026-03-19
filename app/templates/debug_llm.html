@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Local LLM Debug</h2>
+  <p><strong>Ollama base URL:</strong> {{ ollama_base_url }}</p>
+  <p><strong>Model:</strong> {{ ollama_model }}</p>
+  <p><strong>DEBUG_MODE:</strong> {{ debug_mode }}</p>
+  <p><strong>Reachable:</strong> {{ health.reachable }} | <strong>Model available:</strong> {{ health.model_available }}</p>
+</section>
+<section class="card">
+  <form action="/debug/llm/test" method="post">
+    <input type="hidden" name="action" value="connection" />
+    <button type="submit">Test Connection</button>
+  </form>
+  <hr>
+  <form action="/debug/llm/test" method="post">
+    <input type="hidden" name="action" value="prompt" />
+    <label>System</label><textarea name="system" rows="2"></textarea>
+    <label>Prompt</label><textarea name="prompt" rows="8">Return valid JSON with field status.</textarea>
+    <label>Temperature</label><input type="number" name="temperature" step="0.1" value="0.1" />
+    <label>Max tokens</label><input type="number" name="max_tokens" value="256" />
+    <button type="submit">Send Prompt</button>
+  </form>
+</section>
+{% if result %}
+<section class="card"><h3>Result</h3><pre>{{ result }}</pre></section>
+{% endif %}
+{% endblock %}

@@ -1,137 +1,104 @@
 # Lead Enrichment Local
 
-A local-first, free lead enrichment web app for personal research and outreach prep.
+Local FastAPI + Jinja2 + SQLite lead enrichment with local Ollama only (no paid APIs/cloud).
 
-Upload a CSV, crawl public business websites, extract structured signals using deterministic parsing first, enrich fuzzy fields with local Ollama classification, review results in a simple UI, and export enriched CSVs.
+## Debug + Observability Features
 
-## Stack
+- `DEBUG_MODE` toggle in `.env` for richer diagnostics.
+- Structured backend logging (startup, upload, parsing, enrichment, per-lead stages, Ollama calls, exports).
+- CSV Parse Inspector before enrichment starts.
+- Persisted CSV parse diagnostics (`csv_parse_diagnostics`).
+- Per-lead processing trace (`lead_debug_events`).
+- Raw Ollama diagnostics persisted on classifications.
+- Local LLM test UI page and health page.
 
-- Python 3.11+
-- FastAPI + Jinja2 templates
-- SQLite + SQLAlchemy
-- Pandas
-- Requests + BeautifulSoup4
-- Playwright (fallback for JS-heavy pages)
-- Ollama (local), default model: `qwen3-coder`
-
-## What It Does
-
-1. Upload lead CSV
-2. Normalize/clean and dedupe rows
-3. Crawl homepage + likely subpages (`contact`, `about`, `team`, `services`)
-4. Extract emails, phones, social links, address, and website signals
-5. Classify/summarize with local Ollama (when available)
-6. Persist everything in SQLite
-7. Show run + lead details in web UI
-8. Export enriched results as CSV
-
-## Project Structure
-
-```text
-app/
-  main.py
-  db.py
-  models.py
-  schemas.py
-  routes/
-  services/
-  templates/
-  static/
-data/
-  uploads/
-  exports/
-  sample_leads.csv
-requirements.txt
-.env.example
-README.md
-```
-
-## Setup (Mac Local)
-
-1. Create a virtualenv:
+## Setup
 
 ```bash
 python3.11 -m venv .venv
 source .venv/bin/activate
-```
-
-2. Install dependencies:
-
-```bash
 pip install -r requirements.txt
-```
-
-3. Install Playwright browser runtime (required for fallback crawling):
-
-```bash
 playwright install chromium
-```
-
-4. Create `.env` from example:
-
-```bash
 cp .env.example .env
 ```
 
-5. (Optional but recommended) Start Ollama:
+Start Ollama and model:
 
 ```bash
 ollama serve
-ollama pull qwen3-coder
+ollama pull qwen3-coder:30b
 ```
 
-## Run the App
+Run app:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Open: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+## Enable DEBUG_MODE
 
-## Usage Flow
+In `.env`:
 
-1. Go to home page.
-2. Upload `data/sample_leads.csv` (or your own CSV).
-3. Run starts automatically (or click start if disabled).
-4. Open run details to inspect per-lead status and enrichment preview.
-5. Open a lead to inspect raw input, crawled pages, extraction, AI output, and warnings/errors.
-6. Click export to download enriched CSV.
+```env
+DEBUG_MODE=true
+```
 
-## CSV Input Columns
+When true, UI shows richer traces and DB stores extra payloads (`payload_json`, Ollama request/response diagnostics).
 
-Expected columns (missing columns are safely defaulted blank):
+## CSV Preview / Parse Inspector
 
-- `company_name`
-- `website`
-- `city`
-- `state`
-- `phone`
-- `email`
+1. Upload CSV on `/`.
+2. You are redirected to `/runs/{id}/preview`.
+3. Inspect:
+   - original filename
+   - detected/normalized headers
+   - internal mapping (`company_name`, `website`, `city`, `state`, `phone`, `email`)
+   - first 10 parsed rows and cleaned rows
+   - found/missing columns and warnings
+4. Click **Start Enrichment**.
 
-## Error Handling Notes
+## Local LLM Test Page
 
-Handled gracefully with row-level status/error fields:
+Open `/debug/llm`:
 
-- Missing website / invalid URL
-- Request timeout / SSL/network failures
-- Empty or non-extractable pages
-- Ollama unavailable / timeout / malformed model JSON
-- CSV parse errors
-- Export failures
+- View configured Ollama URL/model and debug flag.
+- **Test Connection** checks reachability + model availability.
+- **Send Prompt** sends manual prompt/system/options and shows:
+  - raw response
+  - parsed response
+  - parse errors
+  - request duration
 
-When Ollama is unavailable, enrichment still completes with deterministic extraction results and marks the row with `llm_fallback` details.
+## Health Page
 
-## Known Limitations
+Open `/debug/health` to check:
 
-- Address extraction uses heuristics/regex and may miss complex formats.
-- Social link extraction is best-effort from HTML and may miss JS-injected links.
-- No async queue; processing runs in local FastAPI background tasks.
-- Deduping is in-run only by normalized domain + cleaned company name.
+- app status
+- DB connectivity
+- Ollama connectivity + model
+- uploads/exports directories
+- run count
+- `DEBUG_MODE`
 
-## Future Improvements
+## Stored Debug Data
 
-- Better address parsing and geocoding (local/offline-friendly where possible)
-- Smarter page discovery and crawl depth controls
-- Add pagination/filtering for large runs
-- Add configurable scoring profiles
-- Improve JSON repair and model response validation
+### `csv_parse_diagnostics`
+Stores original/normalized headers, header mapping, row count, preview rows, cleaned preview rows, warnings.
+
+### `lead_debug_events`
+Chronological per-lead stage events (`normalize`, `crawl`, `extract`, `classify`, `score`, `persist`) with concise messages and optional payloads.
+
+### `lead_classifications` (new debug fields)
+- `ollama_request_payload_json`
+- `ollama_raw_response`
+- `ollama_parse_error`
+
+## Main Routes
+
+- `/` upload + runs
+- `/runs/{id}/preview` CSV inspector
+- `/runs/{id}` run debug view
+- `/leads/{id}` lead detail + trace
+- `/debug/llm` local LLM testing
+- `/debug/health` sanity checks
+

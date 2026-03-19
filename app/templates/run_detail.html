@@ -6,6 +6,7 @@
   <p><strong>Status:</strong> <span class="status status-{{ run.status }}">{{ run.status }}</span></p>
   <p><strong>Progress:</strong> {{ run.processed_rows }} / {{ run.total_rows }}</p>
   {% if run.status == "pending" %}
+    <a href="/runs/{{ run.id }}/preview" class="button">Review CSV Preview</a>
     <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Run</button></form>
   {% endif %}
   <a href="/runs/{{ run.id }}/export" class="button">Export Enriched CSV</a>
@@ -16,26 +17,22 @@
   <table>
     <thead>
       <tr>
-        <th>ID</th>
-        <th>Company</th>
-        <th>Website</th>
-        <th>Status</th>
-        <th>Public Email</th>
-        <th>Business Type</th>
-        <th>Fit Score</th>
-        <th>Error</th>
+        <th>ID</th><th>Input</th><th>Normalized</th><th>Pages/Fetch</th><th>Extraction</th><th>Classification</th><th>Score</th><th>Status</th><th>Error</th>
       </tr>
     </thead>
     <tbody>
       {% for lead in run.leads %}
       <tr>
         <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
-        <td>{{ lead.original_company_name }}</td>
-        <td>{{ lead.original_website }}</td>
-        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></td>
-        <td>{{ lead.public_email or "" }}</td>
-        <td>{{ lead.business_type or "" }}</td>
+        <td>{{ lead.original_company_name }}<br>{{ lead.original_website }}</td>
+        <td>{{ lead.cleaned_company_name or "" }}<br>{{ lead.normalized_domain or "" }}</td>
+        <td>{{ lead.pages|length }} pages
+          {% for p in lead.pages %}<div>{{ p.page_type }}: {{ p.fetch_status }}</div>{% endfor %}
+        </td>
+        <td>{{ lead.public_email or "" }} / {{ lead.public_phone or "" }}</td>
+        <td>{{ lead.business_type or "" }}<br>{{ lead.short_summary or "" }}</td>
         <td>{{ lead.fit_score if lead.fit_score is not none else "" }}</td>
+        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></td>
         <td>{{ lead.enrichment_error or "" }}</td>
       </tr>
       {% endfor %}
