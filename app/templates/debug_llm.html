@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Local LLM Debug</h2>
+  <p><strong>Ollama base URL:</strong> {{ ollama_base_url }}</p>
+  <p><strong>Model:</strong> {{ ollama_model }}</p>
+  <p><strong>DEBUG_MODE:</strong> {{ debug_mode }}</p>
+  <p><strong>Reachable:</strong> {{ health.reachable }} | <strong>Model available:</strong> {{ health.model_available }}</p>
+</section>
+<section class="card">
+  <form action="/debug/llm/test" method="post">
+    <input type="hidden" name="action" value="connection" />
+    <button type="submit">Test Connection</button>
+  </form>
+  <hr>
+  <form action="/debug/llm/test" method="post">
+    <input type="hidden" name="action" value="prompt" />
+    <label>System</label><textarea name="system" rows="2">{{ form_values.system }}</textarea>
+    <label>Prompt</label><textarea name="prompt" rows="8">{{ form_values.prompt }}</textarea>
+    <label><input type="checkbox" name="expect_json" value="true" {% if form_values.expect_json %}checked{% endif %}> Expect JSON response</label>
+    <label>Temperature</label><input type="number" name="temperature" step="0.1" value="{{ form_values.temperature }}" />
+    <label>Max tokens</label><input type="number" name="max_tokens" value="{{ form_values.max_tokens }}" />
+    <button type="submit">Send Prompt</button>
+  </form>
+</section>
+{% if result %}
+<section class="card">
+  <h3>Result</h3>
+  <p><strong>Mode:</strong> {% if result.expect_json %}JSON{% else %}Plain Text{% endif %}</p>
+  <p><strong>Duration (ms):</strong> {{ result.duration_ms or "" }}</p>
+  <p><strong>Error:</strong> {{ result.error or "" }}</p>
+  <h4>Request Payload</h4>
+  <pre>{{ result.request_payload }}</pre>
+  <h4>Raw Ollama Payload</h4>
+  <pre>{{ result.raw_payload }}</pre>
+  <h4>Raw Response</h4>
+  <pre>{{ result.raw_response }}</pre>
+  <h4>Parsed JSON (if expected)</h4>
+  <pre>{{ result.parsed_response }}</pre>
+  <h4>Parse Error</h4>
+  <pre>{{ result.parse_error }}</pre>
+</section>
+{% endif %}
+{% endblock %}

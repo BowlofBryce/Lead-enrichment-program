@@ -4,23 +4,21 @@
   <h2>Lead #{{ lead.id }}</h2>
   <p><strong>Run:</strong> <a href="/runs/{{ lead.run_id }}">{{ lead.run_id }}</a></p>
   <p><strong>Status:</strong> <span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></p>
+  <p><strong>Fit score:</strong> {{ lead.fit_score if lead.fit_score is not none else "" }}</p>
 </section>
 
 <section class="card">
-  <h3>Raw Input</h3>
+  <h3>Input + Normalized</h3>
   <ul>
-    <li>Company: {{ lead.original_company_name }}</li>
-    <li>Website: {{ lead.original_website }}</li>
-    <li>City/State: {{ lead.original_city }} / {{ lead.original_state }}</li>
-    <li>Phone: {{ lead.original_phone }}</li>
-    <li>Email: {{ lead.original_email }}</li>
+    <li>Original: {{ lead.original_company_name }} | {{ lead.original_website }} | {{ lead.original_city }} {{ lead.original_state }} | {{ lead.original_phone }} | {{ lead.original_email }}</li>
+    <li>Normalized: {{ lead.cleaned_company_name }} | {{ lead.normalized_domain }} | {{ lead.city }} {{ lead.state }} | {{ lead.normalized_phone }}</li>
   </ul>
 </section>
 
 <section class="card">
-  <h3>Crawled Pages</h3>
+  <h3>Pages Discovered / Fetch Status</h3>
   <table>
-    <thead><tr><th>Type</th><th>URL</th><th>Fetched With</th><th>Status</th></tr></thead>
+    <thead><tr><th>Type</th><th>URL</th><th>Fetched With</th><th>Status</th><th>Text Length</th></tr></thead>
     <tbody>
       {% for p in pages %}
       <tr>
@@ -28,26 +26,32 @@
         <td><a href="{{ p.url }}" target="_blank">{{ p.url }}</a></td>
         <td>{{ p.fetched_with }}</td>
         <td>{{ p.fetch_status }}</td>
+        <td>{{ p.raw_text|length if p.raw_text else 0 }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4">No pages stored.</td></tr>
+      <tr><td colspan="5">No pages stored.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </section>
 
-<section class="card">
-  <h3>Extracted Fields</h3>
-  <pre>{{ extraction }}</pre>
-</section>
+<section class="card"><h3>Extraction Summary</h3><pre>{{ extraction }}</pre></section>
+<section class="card"><h3>Classification Summary</h3><pre>{{ classification }}</pre></section>
+<section class="card"><h3>Error</h3><p>{{ lead.enrichment_error or "None" }}</p></section>
 
+{% if debug_mode %}
 <section class="card">
-  <h3>AI Classification</h3>
-  <pre>{{ classification }}</pre>
+  <h3>Per-lead Processing Trace</h3>
+  <table>
+    <thead><tr><th>Time</th><th>Stage</th><th>Status</th><th>Message</th><th>Payload</th></tr></thead>
+    <tbody>
+      {% for event in debug_events %}
+      <tr><td>{{ event.created_at }}</td><td>{{ event.stage }}</td><td>{{ event.status }}</td><td>{{ event.message }}</td><td>{{ event.payload_json or "" }}</td></tr>
+      {% else %}
+      <tr><td colspan="5">No debug events.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </section>
-
-<section class="card">
-  <h3>Errors / Warnings</h3>
-  <p>{{ lead.enrichment_error or "None" }}</p>
-</section>
+{% endif %}
 {% endblock %}

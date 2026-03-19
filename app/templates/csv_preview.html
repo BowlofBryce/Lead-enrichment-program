@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>CSV Parse Inspector (Run #{{ run.id }})</h2>
+  <p><strong>Original file:</strong> {{ run.filename }}</p>
+  <p><strong>Detected rows:</strong> {{ diagnostic.detected_row_count }}</p>
+  <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Enrichment</button></form>
+</section>
+
+<section class="card">
+  <h3>Headers</h3>
+  <p><strong>Original headers:</strong> {{ original_headers }}</p>
+  <p><strong>Normalized headers:</strong> {{ normalized_headers }}</p>
+  <table>
+    <thead><tr><th>Internal Field</th><th>Mapped CSV Column</th></tr></thead>
+    <tbody>
+      {% for field, source in header_mapping.items() %}
+      <tr><td>{{ field }}</td><td>{{ source if source else "(missing)" }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><strong>Found required/supported columns:</strong> {{ found_columns }}</p>
+  <p><strong>Missing columns:</strong> {{ missing_columns }}</p>
+  {% if warnings %}
+    <h4>Warnings</h4>
+    <ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h3>First 10 Parsed Rows</h3>
+  <pre>{{ preview_rows }}</pre>
+  <h3>Cleaned Preview</h3>
+  <pre>{{ cleaned_preview_rows }}</pre>
+</section>
+{% endblock %}
