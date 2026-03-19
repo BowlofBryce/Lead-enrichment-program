@@ -45,12 +45,13 @@ button, .button {
   cursor: pointer;
 }
 
-.status {
-  border-radius: 999px;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.8rem;
-}
+.status { border-radius: 999px; padding: 0.2rem 0.5rem; font-size: 0.8rem; }
 .status-pending { background: #f3f4f6; }
 .status-processing { background: #fef3c7; }
 .status-completed { background: #dcfce7; }
 .status-failed { background: #fee2e2; }
+
+.badge { margin-left: 8px; background: #e0f2fe; padding: 2px 6px; border-radius: 10px; font-size: 12px; }
+.muted { color: #666; }
+textarea, input[type="number"], input[type="text"], input[type="file"] { width: 100%; margin: 6px 0 12px; }
+pre { white-space: pre-wrap; word-break: break-word; }

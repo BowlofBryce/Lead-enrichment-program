@@ -4,9 +4,9 @@
   <h2>Upload CSV</h2>
   <form action="/upload" method="post" enctype="multipart/form-data">
     <input type="file" name="file" accept=".csv" required>
-    <label><input type="checkbox" name="auto_start" value="true" checked> Start enrichment after upload</label>
-    <button type="submit">Upload</button>
+    <button type="submit">Upload & Preview Parse</button>
   </form>
+  <p class="muted">After upload, you will confirm parsed headers/rows before enrichment starts.</p>
 </section>
 
 <section class="card">

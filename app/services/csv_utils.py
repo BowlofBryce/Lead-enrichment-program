@@ -2,14 +2,31 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
 from app.models import Lead
+from app.services.normalize import clean_company_name, normalize_phone, normalize_url
 
 
 EXPECTED_COLUMNS = ["company_name", "website", "city", "state", "phone", "email"]
+HEADER_ALIASES = {
+    "company": "company_name",
+    "companyname": "company_name",
+    "name": "company_name",
+    "url": "website",
+    "site": "website",
+    "domain": "website",
+    "mail": "email",
+    "emailaddress": "email",
+    "telephone": "phone",
+    "phonenumber": "phone",
+    "province": "state",
+}
 EXPORT_COLUMNS = [
     "original_company_name",
     "original_website",
@@ -47,13 +64,84 @@ EXPORT_COLUMNS = [
 ]
 
 
-def read_upload_csv(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    renamed = {c.lower().strip(): c for c in df.columns}
+@dataclass
+class CSVInspectionResult:
+    dataframe: pd.DataFrame
+    original_headers: list[str]
+    normalized_headers: list[str]
+    header_mapping: dict[str, str]
+    preview_rows: list[dict[str, Any]]
+    cleaned_preview_rows: list[dict[str, Any]]
+    warnings: list[str]
+    detected_row_count: int
+    found_expected_columns: list[str]
+    missing_expected_columns: list[str]
+
+
+def _normalize_header(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    return HEADER_ALIASES.get(cleaned, cleaned)
+
+
+def inspect_upload_csv(path: Path) -> CSVInspectionResult:
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    original_headers = [str(col) for col in df.columns]
+    normalized_headers = [_normalize_header(col) for col in original_headers]
+
+    warnings: list[str] = []
+    if len(normalized_headers) != len(set(normalized_headers)):
+        warnings.append("Duplicate normalized column names detected; later columns may override earlier values.")
+
+    mapping: dict[str, str] = {}
+    renamed_data: dict[str, Any] = {}
+    for original, normalized in zip(original_headers, normalized_headers):
+        mapping[normalized] = original
+        renamed_data[normalized] = df[original]
+
+    normalized_df = pd.DataFrame(renamed_data)
     for col in EXPECTED_COLUMNS:
-        if col not in renamed:
-            df[col] = ""
-    return df
+        if col not in normalized_df.columns:
+            normalized_df[col] = ""
+            mapping.setdefault(col, "")
+
+    found_expected = [col for col in EXPECTED_COLUMNS if mapping.get(col)]
+    missing_expected = [col for col in EXPECTED_COLUMNS if not mapping.get(col)]
+
+    if normalized_df.empty:
+        warnings.append("CSV has zero rows after parsing.")
+
+    preview_df = normalized_df.head(10).fillna("")
+    preview_rows = preview_df.to_dict(orient="records")
+
+    cleaned_preview_rows = []
+    for row in preview_rows:
+        cleaned_preview_rows.append(
+            {
+                "company_name": clean_company_name(str(row.get("company_name", ""))),
+                "website": normalize_url(str(row.get("website", ""))),
+                "city": str(row.get("city", "") or "").strip(),
+                "state": str(row.get("state", "") or "").strip(),
+                "phone": normalize_phone(str(row.get("phone", ""))),
+                "email": str(row.get("email", "") or "").strip().lower(),
+            }
+        )
+
+    return CSVInspectionResult(
+        dataframe=normalized_df,
+        original_headers=original_headers,
+        normalized_headers=normalized_headers,
+        header_mapping={field: mapping.get(field, "") for field in EXPECTED_COLUMNS},
+        preview_rows=preview_rows,
+        cleaned_preview_rows=cleaned_preview_rows,
+        warnings=warnings,
+        detected_row_count=int(len(normalized_df)),
+        found_expected_columns=found_expected,
+        missing_expected_columns=missing_expected,
+    )
+
+
+def read_upload_csv(path: Path) -> pd.DataFrame:
+    return inspect_upload_csv(path).dataframe
 
 
 def lead_to_export_row(lead: Lead) -> dict:

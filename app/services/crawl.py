@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from app.services.logging_utils import get_logger
 from app.settings import settings
 
 
@@ -15,6 +16,7 @@ PAGE_HINTS = {
     "team": ["team", "staff", "leadership", "our-team"],
     "services": ["services", "what-we-do", "solutions"],
 }
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -30,6 +32,7 @@ class CrawledPage:
 
 def _fetch_with_requests(url: str) -> tuple[str, str, str]:
     try:
+        logger.info("crawl.fetch.requests", extra_fields={"url": url})
         resp = requests.get(
             url,
             timeout=settings.request_timeout_seconds,
@@ -51,6 +54,7 @@ def _fetch_with_playwright(url: str) -> tuple[str, str, str]:
     except Exception as exc:
         raise RuntimeError(f"Playwright unavailable: {exc}") from exc
 
+    logger.info("crawl.fetch.playwright", extra_fields={"url": url})
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
@@ -69,7 +73,7 @@ def _needs_js_fallback(text: str, html: str) -> bool:
     if len(text) < 180:
         return True
     lowered = html.lower()
-    return "__next" in lowered or "id=\"app\"" in lowered or "react-root" in lowered
+    return "__next" in lowered or 'id="app"' in lowered or "react-root" in lowered
 
 
 def discover_candidate_links(base_url: str, homepage_html: str) -> dict[str, str]:
@@ -100,31 +104,12 @@ def crawl_site(start_url: str) -> list[CrawledPage]:
         html, title, text = _fetch_with_requests(start_url)
         fetched_with = "requests"
         if _needs_js_fallback(text, html):
+            logger.info("crawl.fallback.playwright", extra_fields={"url": start_url})
             html, title, text = _fetch_with_playwright(start_url)
             fetched_with = "playwright"
-        pages.append(
-            CrawledPage(
-                page_type="homepage",
-                url=start_url,
-                title=title,
-                html=html,
-                text=text,
-                fetched_with=fetched_with,
-                fetch_status="ok",
-            )
-        )
+        pages.append(CrawledPage("homepage", start_url, title, html, text, fetched_with, "ok"))
     except Exception as exc:
-        pages.append(
-            CrawledPage(
-                page_type="homepage",
-                url=start_url,
-                title="",
-                html="",
-                text="",
-                fetched_with="requests",
-                fetch_status=f"error: {exc}",
-            )
-        )
+        pages.append(CrawledPage("homepage", start_url, "", "", "", "requests", f"error: {exc}"))
         return pages
 
     links = discover_candidate_links(start_url, pages[0].html)
@@ -136,29 +121,10 @@ def crawl_site(start_url: str) -> list[CrawledPage]:
             html, title, text = _fetch_with_requests(url)
             fetched_with = "requests"
             if _needs_js_fallback(text, html):
+                logger.info("crawl.fallback.playwright", extra_fields={"url": url, "page_type": page_type})
                 html, title, text = _fetch_with_playwright(url)
                 fetched_with = "playwright"
-            pages.append(
-                CrawledPage(
-                    page_type=page_type,
-                    url=url,
-                    title=title,
-                    html=html,
-                    text=text,
-                    fetched_with=fetched_with,
-                    fetch_status="ok",
-                )
-            )
+            pages.append(CrawledPage(page_type, url, title, html, text, fetched_with, "ok"))
         except Exception as exc:
-            pages.append(
-                CrawledPage(
-                    page_type=page_type,
-                    url=url,
-                    title="",
-                    html="",
-                    text="",
-                    fetched_with="requests",
-                    fetch_status=f"error: {exc}",
-                )
-            )
+            pages.append(CrawledPage(page_type, url, "", "", "", "requests", f"error: {exc}"))
     return pages
