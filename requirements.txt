@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+jinja2
+sqlalchemy
+pandas
+requests
+beautifulsoup4
+playwright
+pydantic
+pydantic-settings

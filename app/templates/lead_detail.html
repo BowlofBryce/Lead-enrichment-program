@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Lead #{{ lead.id }}</h2>
+  <p><strong>Run:</strong> <a href="/runs/{{ lead.run_id }}">{{ lead.run_id }}</a></p>
+  <p><strong>Status:</strong> <span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></p>
+</section>
+
+<section class="card">
+  <h3>Raw Input</h3>
+  <ul>
+    <li>Company: {{ lead.original_company_name }}</li>
+    <li>Website: {{ lead.original_website }}</li>
+    <li>City/State: {{ lead.original_city }} / {{ lead.original_state }}</li>
+    <li>Phone: {{ lead.original_phone }}</li>
+    <li>Email: {{ lead.original_email }}</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Crawled Pages</h3>
+  <table>
+    <thead><tr><th>Type</th><th>URL</th><th>Fetched With</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for p in pages %}
+      <tr>
+        <td>{{ p.page_type }}</td>
+        <td><a href="{{ p.url }}" target="_blank">{{ p.url }}</a></td>
+        <td>{{ p.fetched_with }}</td>
+        <td>{{ p.fetch_status }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4">No pages stored.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>Extracted Fields</h3>
+  <pre>{{ extraction }}</pre>
+</section>
+
+<section class="card">
+  <h3>AI Classification</h3>
+  <pre>{{ classification }}</pre>
+</section>
+
+<section class="card">
+  <h3>Errors / Warnings</h3>
+  <p>{{ lead.enrichment_error or "None" }}</p>
+</section>
+{% endblock %}

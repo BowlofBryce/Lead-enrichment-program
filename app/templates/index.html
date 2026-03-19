@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Upload CSV</h2>
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".csv" required>
+    <label><input type="checkbox" name="auto_start" value="true" checked> Start enrichment after upload</label>
+    <button type="submit">Upload</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Recent Runs</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Filename</th>
+        <th>Status</th>
+        <th>Progress</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
+        <td>{{ run.filename }}</td>
+        <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+        <td>{{ run.processed_rows }} / {{ run.total_rows }}</td>
+        <td>{{ run.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">No runs yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
