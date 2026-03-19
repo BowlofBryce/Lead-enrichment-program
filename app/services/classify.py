@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.services.ollama_client import OllamaResult, generate_json
 from app.settings import settings
@@ -22,6 +23,9 @@ class ClassificationResult:
     fit_reason: str
     confidence: float
     error: str
+    ollama_request_payload: dict[str, Any] = field(default_factory=dict)
+    ollama_raw_response: str = ""
+    ollama_parse_error: str = ""
 
 
 def _as_bool(value: object) -> bool:
@@ -50,9 +54,9 @@ Website content:
     result: OllamaResult = generate_json(prompt=prompt, retries=2)
     if not result.ok:
         return ClassificationResult(
-            model_name="",
+            model_name=settings.ollama_model,
             prompt_version="v1",
-            raw_response="",
+            raw_response=result.raw_text,
             business_type="",
             services=[],
             short_summary="",
@@ -64,6 +68,9 @@ Website content:
             fit_reason="",
             confidence=0.0,
             error=result.error or "ollama_unavailable",
+            ollama_request_payload=result.request_payload,
+            ollama_raw_response=result.raw_text,
+            ollama_parse_error=result.parse_error,
         )
 
     data = result.data
@@ -84,4 +91,7 @@ Website content:
         fit_reason=str(data.get("fit_reason", "") or ""),
         confidence=float(data.get("confidence", 0.0) or 0.0),
         error="",
+        ollama_request_payload=result.request_payload,
+        ollama_raw_response=result.raw_text,
+        ollama_parse_error=result.parse_error,
     )

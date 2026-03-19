@@ -21,6 +21,9 @@ class EnrichmentRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="run", cascade="all,delete")
+    csv_diagnostic: Mapped["CSVParseDiagnostic | None"] = relationship(
+        back_populates="run", uselist=False, cascade="all,delete"
+    )
 
 
 class Lead(Base):
@@ -68,6 +71,7 @@ class Lead(Base):
     classification: Mapped["LeadClassification | None"] = relationship(
         back_populates="lead", uselist=False, cascade="all,delete"
     )
+    debug_events: Mapped[list["LeadDebugEvent"]] = relationship(back_populates="lead", cascade="all,delete")
 
 
 class LeadPage(Base):
@@ -121,6 +125,41 @@ class LeadClassification(Base):
     likely_decision_maker_names_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fit_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ollama_request_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ollama_raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ollama_parse_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     lead: Mapped[Lead] = relationship(back_populates="classification")
+
+
+class CSVParseDiagnostic(Base):
+    __tablename__ = "csv_parse_diagnostics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("enrichment_runs.id"), unique=True, nullable=False)
+    original_headers_json: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_headers_json: Mapped[str] = mapped_column(Text, nullable=False)
+    header_mapping_json: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    preview_rows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    cleaned_preview_rows_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warnings_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    run: Mapped[EnrichmentRun] = relationship(back_populates="csv_diagnostic")
+
+
+class LeadDebugEvent(Base):
+    __tablename__ = "lead_debug_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), index=True, nullable=False)
+    run_id: Mapped[int] = mapped_column(ForeignKey("enrichment_runs.id"), index=True, nullable=False)
+    stage: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    lead: Mapped[Lead] = relationship(back_populates="debug_events")
