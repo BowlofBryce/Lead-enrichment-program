@@ -148,7 +148,7 @@ Deterministic first:
 
 ## Per-run model selection and custom instructions
 
-On `/runs/{id}/preview`, before starting enrichment:
+On `/runs/{id}/preview` (and also from a pending run page `/runs/{id}`), before starting enrichment:
 1. Pick **Model for this run** from currently installed Ollama models.
 2. Optionally add **Run-level custom instructions**.
 3. Start the run.

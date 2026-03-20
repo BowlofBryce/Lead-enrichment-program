@@ -10,7 +10,22 @@
   {% endif %}
   {% if run.status == "pending" %}
     <a href="/runs/{{ run.id }}/preview" class="button">Review CSV Preview</a>
-    <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Run</button></form>
+    <form action="/runs/{{ run.id }}/start" method="post">
+      {% if not ollama_reachable %}
+        <p><strong>Ollama status:</strong> <span class="status status-failed">Unavailable</span> — {{ ollama_models_error }}</p>
+      {% endif %}
+      <label for="selected_model"><strong>Model for this run</strong></label>
+      <select id="selected_model" name="selected_model">
+        <option value="">Use default ({{ default_model }})</option>
+        {% for model in installed_models %}
+          <option value="{{ model.name }}" {% if run.selected_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="custom_instructions"><strong>Run-level custom instructions</strong></label>
+      <textarea id="custom_instructions" name="custom_instructions" rows="5" placeholder="Optional guidance for resolution/classification.">{{ run.custom_instructions or "" }}</textarea>
+      <button type="submit">Start Run</button>
+    </form>
   {% endif %}
   <a href="/runs/{{ run.id }}/export" class="button">Export Enriched CSV</a>
 </section>

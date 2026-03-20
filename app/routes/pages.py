@@ -198,6 +198,7 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Run not found")
     used_default_model = not bool((run.selected_model or "").strip())
     resolved_model = run.selected_model or settings.ollama_model
+    models_state = _load_models_state()
     return templates.TemplateResponse(
         "run_detail.html",
         {
@@ -207,6 +208,9 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
             "resolved_model": resolved_model,
             "used_default_model": used_default_model,
             "default_model": settings.ollama_model,
+            "installed_models": models_state["models"],
+            "ollama_reachable": models_state["reachable"],
+            "ollama_models_error": models_state["error"],
         },
     )
 
@@ -404,6 +408,10 @@ def create_preset_route(
     system_prompt = system_prompt.strip()
     if not base_model or not preset_name or not system_prompt:
         return RedirectResponse(url="/models?error=Base+model%2C+preset+name%2C+and+system+prompt+are+required", status_code=303)
+    model_state = _load_models_state()
+    model_names = set(model_state["model_names"])
+    if model_names and base_model not in model_names:
+        return RedirectResponse(url=f"/models?error={quote_plus(f'Base model not installed: {base_model}')}", status_code=303)
     try:
         create_model_preset(base_model=base_model, preset_name=preset_name, system_prompt=system_prompt)
         logger.info("ollama.model.create_preset.success", extra_fields={"base_model": base_model, "preset_name": preset_name})

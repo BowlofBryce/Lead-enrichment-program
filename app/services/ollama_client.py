@@ -88,14 +88,24 @@ def pull_model(model_name: str) -> dict[str, Any]:
 
 
 def create_model_preset(base_model: str, preset_name: str, system_prompt: str) -> dict[str, Any]:
-    modelfile = f'FROM {base_model}\n\nSYSTEM """\n{system_prompt.strip()}\n"""'
+    clean_prompt = system_prompt.strip().replace("\r\n", "\n")
+    modelfile = f'FROM {base_model}\n\nSYSTEM """\n{clean_prompt}\n"""\n'
     payload = {"name": preset_name, "modelfile": modelfile, "stream": False}
     resp = requests.post(
         f"{settings.ollama_base_url}/api/create",
         json=payload,
         timeout=settings.ollama_timeout_seconds,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        detail = ""
+        try:
+            detail = str(resp.json().get("error", "") or "")
+        except Exception:
+            detail = resp.text[:300]
+        raise requests.HTTPError(
+            f"{resp.status_code} {resp.reason}: {detail or 'unknown error'}",
+            response=resp,
+        )
     return resp.json() if resp.content else {"status": "ok"}
 
 
