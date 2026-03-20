@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.services.ollama_client import generate_json
 from app.services.normalize import clean_company_name, normalize_domain, normalize_phone, normalize_url
 
 CANONICAL_COLUMNS = [
@@ -98,7 +99,7 @@ def alias_lookup() -> dict[str, str]:
     return out
 
 
-def pick_canonical_mapping(headers: list[str]) -> tuple[dict[str, str], list[str], list[str]]:
+def _pick_heuristic_mapping(headers: list[str]) -> tuple[dict[str, str], list[str], list[str]]:
     normalized_to_original: dict[str, str] = {}
     for header in headers:
         normalized_to_original[normalize_column_name(header)] = header
@@ -120,6 +121,60 @@ def pick_canonical_mapping(headers: list[str]) -> tuple[dict[str, str], list[str
 
     normalized_headers = [lookup.get(normalize_column_name(h), normalize_column_name(h)) for h in headers]
     return mapping, normalized_headers, warnings
+
+
+def _llm_mapping_prompt(headers: list[str]) -> str:
+    alias_examples = {k: v for k, v in CANONICAL_ALIASES.items()}
+    return (
+        "Map CSV headers to canonical lead fields.\n"
+        "Return JSON object with key 'mapping' whose value is an object from canonical field to exact CSV header.\n"
+        "Rules:\n"
+        "- Use only headers from the given list exactly as written.\n"
+        "- Use empty string for unmapped fields.\n"
+        "- Prefer semantic meaning over literal string match.\n"
+        "- Do not invent keys beyond provided canonical fields.\n\n"
+        f"Canonical fields: {json.dumps(CANONICAL_COLUMNS)}\n"
+        f"Known alias hints: {json.dumps(alias_examples)}\n"
+        f"CSV headers: {json.dumps(headers)}\n"
+    )
+
+
+def _coerce_llm_mapping(headers: list[str], raw: dict[str, Any]) -> dict[str, str]:
+    header_set = set(headers)
+    out = {k: "" for k in CANONICAL_COLUMNS}
+    raw_mapping = raw.get("mapping")
+    if not isinstance(raw_mapping, dict):
+        return out
+
+    for canonical in CANONICAL_COLUMNS:
+        picked = raw_mapping.get(canonical, "")
+        picked_str = str(picked).strip() if picked is not None else ""
+        out[canonical] = picked_str if picked_str in header_set else ""
+    return out
+
+
+def pick_canonical_mapping(headers: list[str]) -> tuple[dict[str, str], list[str], list[str]]:
+    heuristic_mapping, normalized_headers, warnings = _pick_heuristic_mapping(headers)
+    prompt = _llm_mapping_prompt(headers)
+    result = generate_json(prompt=prompt, retries=1, temperature=0)
+    if not result.ok:
+        warnings.append(f"LLM mapping unavailable; using heuristic mapping ({result.error or 'unknown_error'}).")
+        return heuristic_mapping, normalized_headers, warnings
+
+    llm_mapping = _coerce_llm_mapping(headers, result.data)
+    if not any(llm_mapping.values()):
+        warnings.append("LLM mapping returned no usable fields; using heuristic mapping.")
+        return heuristic_mapping, normalized_headers, warnings
+
+    for canonical, source in heuristic_mapping.items():
+        if source and not llm_mapping.get(canonical):
+            llm_mapping[canonical] = source
+
+    for canonical, source in llm_mapping.items():
+        heuristic_source = heuristic_mapping.get(canonical, "")
+        if source and heuristic_source and source != heuristic_source:
+            warnings.append(f"LLM mapping override for {canonical}: {heuristic_source} -> {source}")
+    return llm_mapping, normalized_headers, warnings
 
 
 def _title_case(value: str) -> str:
