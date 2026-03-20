@@ -5,6 +5,7 @@
   <p><strong>Run:</strong> <a href="/runs/{{ lead.run_id }}">{{ lead.run_id }}</a></p>
   <p><strong>Status:</strong> <span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></p>
   <p><strong>Anchor:</strong> {{ lead.anchor_type or "" }} → {{ lead.anchor_value or "" }}</p>
+  <p><strong>Anchor source:</strong> {{ lead.anchor_source or "" }}</p>
 </section>
 
 <section class="card">
@@ -18,9 +19,18 @@
     <li>Name: {{ lead.normalized_full_name }} ({{ lead.first_name }} {{ lead.last_name }})</li>
     <li>Title: {{ lead.normalized_title }}</li>
     <li>Company: {{ lead.normalized_company_name }} | {{ lead.company_domain }} | {{ lead.website }}</li>
+    <li>Original location inputs: {{ lead.original_city or "" }}, {{ lead.original_state or "" }}, {{ lead.original_address or "" }}</li>
     <li>Contact: {{ lead.normalized_email }} | {{ lead.normalized_phone }} | LinkedIn {{ lead.linkedin_url }}</li>
     <li>Location: {{ lead.city }} {{ lead.state }} | {{ lead.location_text }}</li>
   </ul>
+</section>
+
+<section class="card">
+  <h3>Company Resolution</h3>
+  <p>Status={{ lead.resolution_status or "" }}, method={{ lead.resolution_method or "" }}, confidence={{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }}</p>
+  <p>Resolved website/domain: {{ lead.resolved_website or "" }} / {{ lead.resolved_domain or "" }}</p>
+  <p>Notes: {{ lead.resolution_notes or "" }}</p>
+  <pre>{{ lead.candidate_websites_json or "[]" }}</pre>
 </section>
 
 <section class="card">

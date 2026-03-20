@@ -14,6 +14,7 @@ from app.services.extract import extract_from_pages
 from app.services.lead_row import analyze_row, canonicalize_row, compute_scores, resolve_anchor, to_json
 from app.services.logging_utils import get_logger
 from app.services.normalize import dedupe_key, normalize_domain, normalize_url
+from app.services.resolution import resolve_company_website
 from app.settings import settings
 
 logger = get_logger(__name__)
@@ -91,6 +92,24 @@ def process_run(db: Session, run_id: int) -> None:
             raw_row = json.loads(lead.original_row_json or "{}")
             canonical = canonicalize_row(raw_row, header_mapping)
             analysis = analyze_row(canonical)
+            resolution = resolve_company_website(canonical)
+
+            for event in resolution.trace:
+                _add_debug_event(
+                    db,
+                    run_id=run.id,
+                    lead_id=lead.id,
+                    stage=event.get("stage", "resolution.trace"),
+                    status=event.get("status", "ok"),
+                    message=event.get("message", event.get("reason", "resolution trace")),
+                    payload=event,
+                )
+
+            if resolution.resolved_website and not canonical.website:
+                canonical.website = normalize_url(resolution.resolved_website)
+            if resolution.resolved_domain and not canonical.company_domain:
+                canonical.company_domain = normalize_domain(resolution.resolved_domain)
+
             anchor = resolve_anchor(canonical)
 
             lead.first_name = canonical.first_name
@@ -112,6 +131,7 @@ def process_run(db: Session, run_id: int) -> None:
             lead.city = canonical.city
             lead.state = canonical.state
             lead.location_text = canonical.location_text
+            lead.input_address = canonical.address
 
             lead.cleaned_company_name = canonical.normalized_company_name
             lead.normalized_domain = canonical.company_domain
@@ -119,6 +139,14 @@ def process_run(db: Session, run_id: int) -> None:
             lead.anchor_type = anchor.anchor_type
             lead.anchor_value = anchor.anchor_value
             lead.anchor_reason = anchor.reason
+            lead.anchor_source = "resolution" if resolution.resolution_status == "resolved" else "original_or_derived"
+            lead.resolved_website = resolution.resolved_website
+            lead.resolved_domain = resolution.resolved_domain
+            lead.resolution_method = resolution.resolution_method
+            lead.resolution_confidence = resolution.resolution_confidence
+            lead.resolution_notes = resolution.resolution_notes
+            lead.candidate_websites_json = resolution.candidate_websites_json
+            lead.resolution_status = resolution.resolution_status
             lead.fields_present_json = to_json(analysis.fields_present)
             lead.fields_missing_json = to_json(analysis.fields_missing)
             lead.fields_suspicious_json = to_json(analysis.fields_suspicious)
@@ -145,6 +173,13 @@ def process_run(db: Session, run_id: int) -> None:
                     "missing": analysis.fields_missing,
                     "suspicious": analysis.fields_suspicious,
                     "anchor": anchor.__dict__,
+                    "resolution": {
+                        "status": resolution.resolution_status,
+                        "method": resolution.resolution_method,
+                        "confidence": resolution.resolution_confidence,
+                        "notes": resolution.resolution_notes,
+                        "search_queries": resolution.search_queries,
+                    },
                 },
             )
             db.commit()
@@ -290,7 +325,14 @@ def process_run(db: Session, run_id: int) -> None:
             elif good_pages and lead.full_name:
                 lead.validation_notes = f"{lead.validation_notes}; company site found but person not found".strip("; ")
 
-            scores = compute_scores(canonical, analysis, person_name_found=person_name_found, company_site_found=company_site_found)
+            scores = compute_scores(
+                canonical,
+                analysis,
+                person_name_found=person_name_found,
+                company_site_found=company_site_found,
+                resolution_confidence=resolution.resolution_confidence,
+                resolution_status=resolution.resolution_status,
+            )
             lead.company_match_confidence = float(scores["company_match_confidence"])
             lead.person_match_confidence = float(scores["person_match_confidence"])
             lead.enrichment_confidence = float(scores["enrichment_confidence"])
@@ -298,6 +340,9 @@ def process_run(db: Session, run_id: int) -> None:
             lead.fit_score = lead.lead_quality_score
             lead.extraction_confidence = lead.enrichment_confidence
             lead.outreach_angle = _build_outreach_angle(lead)
+            if resolution.resolution_status == "resolved":
+                provenance["resolved_website"] = "resolution_search_or_email"
+                provenance["resolved_domain"] = "resolution_search_or_email"
             lead.provenance_json = json.dumps(provenance)
 
             if anchor.anchor_type == "unresolved":

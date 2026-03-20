@@ -8,8 +8,9 @@ The product is now **row-first** instead of website-first. For each CSV row, it 
 1. maps flexible Apollo-style headers into a canonical schema,
 2. normalizes row values,
 3. analyzes missing/suspicious fields,
-4. resolves the best anchor,
-5. crawls a company site only when useful,
+4. runs a local-first company resolution stage when website/domain is missing,
+5. resolves the best anchor (original vs resolved),
+6. crawls a company site only when useful,
 6. enriches company/site fields,
 7. runs person-aware validation checks,
 8. exports original + canonical + enriched + score/provenance columns.
@@ -30,6 +31,7 @@ Common aliases are mapped to canonical fields:
 - company_domain: `domain`, `company_domain`
 - linkedin_url: `linkedin`, `linkedin_url`, `linkedin profile`
 - city/state/location
+- address/street/street_address
 
 ## Canonical lead-row schema
 
@@ -44,6 +46,9 @@ Core canonical fields:
 
 Row analysis + result fields:
 - anchor_type, anchor_value, anchor_reason
+- anchor_source
+- resolved_website, resolved_domain
+- resolution_method, resolution_confidence, resolution_status, resolution_notes
 - fields_present_json, fields_missing_json, fields_suspicious_json
 - enrichment_confidence, person_match_confidence, company_match_confidence
 - lead_quality_score, validation_notes, outreach_angle
@@ -55,13 +60,38 @@ Company/site enrichment fields:
 - contact/about/team URLs + social URLs
 - has_contact_form, has_online_booking, has_chat_widget, mentions_financing
 
+## Company resolution stage (local-first)
+
+Before crawl/enrichment, rows missing website/domain go through deterministic resolution:
+1. Short-circuit: skip if strong existing anchor already exists.
+2. Email derivation: use non-generic email domain when available.
+3. Public web search (DuckDuckGo HTML): query company + city/state (+address if present).
+4. Candidate validation: fetch candidate pages with `requests` and Playwright fallback.
+5. Deterministic scoring and conservative selection.
+
+Evidence used during scoring:
+- company name similarity (domain/title/H1/body)
+- city/state/address mentions
+- phone match on page (strong signal)
+- local-business hints (`tattoo`, `studio`, `ink`, etc.)
+- reject social/listing domains as final canonical websites when possible
+
+Outcomes are explicit:
+- `skipped_existing_anchor`
+- `resolved`
+- `ambiguous`
+- `unresolved`
+- `failed`
+
+If confidence is weak, rows stay unresolved with candidate evidence and notes.
+
 ## Anchor resolution order
 
 Priority order per row:
 1. linkedin_url
 2. email domain
-3. company_domain
-4. website
+3. website
+4. company_domain
 5. company_name + city/state
 6. company_name
 
@@ -91,6 +121,7 @@ It does **not** invent personal emails, direct dials, or job titles not present 
 
 Deterministic first:
 - `company_match_confidence`: domain/website/company consistency + crawl success
+- `company_match_confidence` also incorporates resolution quality signals when resolution ran
 - `person_match_confidence`: person fields + linkedin + team/about name evidence
 - `enrichment_confidence`: weighted rollup
 - `lead_quality_score`: 0–100 scaled with penalties for missing critical fields
@@ -99,6 +130,8 @@ Deterministic first:
 
 - `/runs/{id}/preview`: header mapping + canonical parse preview + mapping warnings
 - `/runs/{id}`: per-row anchors, analysis, enrichment outputs, scores
+- `/runs/{id}` auto-refreshes during processing for live progress + per-row updates
+- `/api/runs/{id}/progress`: JSON feed used by live run view polling
 - `/leads/{id}`: original row, canonical row, analysis, provenance, debug trace
 - `/debug/health`: DB + Ollama + directory checks
 - `/debug/llm`: local manual Ollama test UI
@@ -125,7 +158,29 @@ uvicorn app.main:app --reload
 # upload CSV at /
 # review parse at /runs/{id}/preview
 # start enrichment
+# inspect resolution details at /runs/{id} and /leads/{lead_id}
 # export from /runs/{id}/export
 ```
+
+## Practical local-business test flow
+
+1. Upload `data/sample_leads.csv` (includes website-present rows, name+location rows, ambiguous rows).
+2. Confirm preview mapping includes `company_name`, `city`, `state`, and `address` where present.
+3. Start run and inspect run detail for:
+   - `resolution_status`
+   - `resolution_confidence`
+   - whether anchor source is `original_or_derived` or `resolution`.
+4. Open a lead detail page to review candidate list and debug events:
+   - `resolution.search`
+   - `resolution.candidate_found`
+   - `resolution.candidate_scored`
+   - `resolution.selected` / `resolution.unresolved`.
+5. Export CSV and verify resolution columns are included.
+
+## Limitations
+
+- Public search HTML parsing can break if search engines change markup.
+- Some local businesses only have social/listing pages; these are treated cautiously and may remain unresolved.
+- This tool does not claim resolution success unless evidence passes threshold.
 
 Backward compatibility is preserved: CSVs with only company/site/location still run.

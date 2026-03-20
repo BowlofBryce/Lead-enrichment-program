@@ -3,8 +3,8 @@
 <section class="card">
   <h2>Run #{{ run.id }}</h2>
   <p><strong>File:</strong> {{ run.filename }}</p>
-  <p><strong>Status:</strong> <span class="status status-{{ run.status }}">{{ run.status }}</span></p>
-  <p><strong>Progress:</strong> {{ run.processed_rows }} / {{ run.total_rows }}</p>
+  <p><strong>Status:</strong> <span id="run-status" class="status status-{{ run.status }}">{{ run.status }}</span></p>
+  <p><strong>Progress:</strong> <span id="run-progress">{{ run.processed_rows }} / {{ run.total_rows }}</span></p>
   {% if run.status == "pending" %}
     <a href="/runs/{{ run.id }}/preview" class="button">Review CSV Preview</a>
     <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Run</button></form>
@@ -17,15 +17,15 @@
   <table>
     <thead>
       <tr>
-        <th>ID</th><th>Person/Company</th><th>Anchor</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
+        <th>ID</th><th>Person/Company</th><th>Anchor + Resolution</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="lead-rows-body">
       {% for lead in run.leads %}
       <tr>
         <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
         <td>{{ lead.normalized_full_name or lead.full_name or "" }}<br>{{ lead.normalized_company_name or lead.company_name or "" }}<br>{{ lead.normalized_title or lead.title or "" }}</td>
-        <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}</td>
+        <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}<br>source={{ lead.anchor_source or "" }}<br>resolution={{ lead.resolution_status or "" }} ({{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }})</td>
         <td>missing={{ lead.fields_missing_json or "[]" }}<br>suspicious={{ lead.fields_suspicious_json or "[]" }}</td>
         <td>{{ lead.business_type or "" }}<br>{{ lead.public_company_email or "" }} / {{ lead.public_company_phone or "" }}</td>
         <td>enrich={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}<br>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score if lead.lead_quality_score is not none else "" }}</td>
@@ -35,4 +35,48 @@
     </tbody>
   </table>
 </section>
+
+<script>
+  const runId = {{ run.id }};
+  const statusEl = document.getElementById("run-status");
+  const progressEl = document.getElementById("run-progress");
+  const bodyEl = document.getElementById("lead-rows-body");
+
+  function fmt(value) {
+    return value === null || value === undefined ? "" : value;
+  }
+
+  function rowHtml(lead) {
+    return `
+      <tr>
+        <td><a href="/leads/${lead.id}">${lead.id}</a></td>
+        <td>${fmt(lead.person_company)}</td>
+        <td>${fmt(lead.anchor_type)}<br>${fmt(lead.anchor_value)}<br>source=${fmt(lead.anchor_source)}<br>resolution=${fmt(lead.resolution_status)} (${fmt(lead.resolution_confidence)})</td>
+        <td>missing=${fmt(lead.analysis_missing)}<br>suspicious=${fmt(lead.analysis_suspicious)}</td>
+        <td>${fmt(lead.business_type)}<br>${fmt(lead.public_company_email)} / ${fmt(lead.public_company_phone)}</td>
+        <td>enrich=${fmt(lead.enrichment_confidence)}<br>person=${fmt(lead.person_match_confidence)}<br>company=${fmt(lead.company_match_confidence)}<br>quality=${fmt(lead.lead_quality_score)}</td>
+        <td><span class="status status-${fmt(lead.enrichment_status)}">${fmt(lead.enrichment_status)}</span><br>${fmt(lead.enrichment_error)}</td>
+      </tr>
+    `;
+  }
+
+  async function refreshRun() {
+    try {
+      const resp = await fetch(`/api/runs/${runId}/progress`, {cache: "no-store"});
+      if (!resp.ok) return;
+      const data = await resp.json();
+      statusEl.textContent = data.status;
+      statusEl.className = `status status-${data.status}`;
+      progressEl.textContent = `${data.processed_rows} / ${data.total_rows}`;
+      bodyEl.innerHTML = data.leads.map(rowHtml).join("");
+      if (data.status === "processing" || data.status === "pending") {
+        setTimeout(refreshRun, 2000);
+      }
+    } catch (err) {
+      setTimeout(refreshRun, 3500);
+    }
+  }
+
+  refreshRun();
+</script>
 {% endblock %}

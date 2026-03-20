@@ -1,6 +1,11 @@
-first_name,last_name,company,title,email,phone,website,linkedin profile,city,state,location
-Maya,Lopez,North Ridge Dental,Office Manager,maya.lopez@northridgedental.com,,northridgedental.com,https://www.linkedin.com/in/maya-lopez-dental/,Austin,TX,
-,Chen,Summit HVAC,,info@summithvac.com,512-555-1100,https://summithvac.com,,Round Rock,TX,
-Jordan,,Blue Harbor Wellness,Founder,jordan@blueharborwellness.com,,blueharborwellness.com,,Seattle,WA,
-Alex,Patel,,VP Operations,alex.patel@everpeak.io,,https://everpeak.io,,San Jose,CA,
-Taylor,Reed,Oakline Roofing,Project Estimator,,,oaklineroofing.com,,Denver,CO,
+first_name,last_name,company,title,email,phone,website,linkedin profile,city,state,address,location
+Maya,Lopez,North Ridge Dental,Office Manager,maya.lopez@northridgedental.com,,northridgedental.com,https://www.linkedin.com/in/maya-lopez-dental/,Austin,TX,1021 W Anderson Ln,Austin TX
+,Chen,Summit HVAC,,info@summithvac.com,512-555-1100,https://summithvac.com,,Round Rock,TX,1200 Palm Valley Blvd,Round Rock TX
+Jordan,,Blue Harbor Wellness,Founder,jordan@blueharborwellness.com,,blueharborwellness.com,,Seattle,WA,,Seattle WA
+Alex,Patel,,VP Operations,alex.patel@everpeak.io,,https://everpeak.io,,San Jose,CA,,San Jose CA
+Taylor,Reed,Oakline Roofing,Project Estimator,,,oaklineroofing.com,,Denver,CO,788 Federal Blvd,Denver CO
+,,Black Lantern Tattoo Studio,,, , , ,Portland,OR,2456 SE Belmont St,Portland OR
+,,Electric Lotus Ink,,,503-555-9901,,,Portland,OR,1337 NW 23rd Ave,Portland OR
+,,Main Street Plumbing Services,,,617-555-2020,,,Boston,MA,88 Main St,Boston MA
+,,Rose City Tattoo,,,,,,Portland,OR,,Portland OR
+,,Springfield Family Dental,,,408-555-1111,,,San Jose,CA,350 N 2nd St,San Jose CA
