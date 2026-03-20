@@ -12,6 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.services.crawl import _fetch_with_playwright
+from app.services.query_generation import generate_queries_if_needed
 from app.services.lead_row import CanonicalLeadRow
 from app.services.normalize import clean_company_name, normalize_domain, normalize_phone, normalize_url
 from app.settings import settings
@@ -29,6 +30,11 @@ BLOCKED_FINAL_DOMAINS = {
     "twitter.com",
     "tiktok.com",
     "nextdoor.com",
+    "wikipedia.org",
+    "zillow.com",
+    "homes.com",
+    "niche.com",
+    "city-data.com",
 }
 SUSPICIOUS_ANCHOR_DOMAINS = {"example.com", "test.com", "localhost"}
 
@@ -106,7 +112,31 @@ def _instruction_hints(custom_instructions: str | None) -> list[str]:
     return unique[:4]
 
 
-def _search_queries(canonical: CanonicalLeadRow, custom_instructions: str | None = None) -> list[str]:
+def _search_queries(
+    canonical: CanonicalLeadRow,
+    custom_instructions: str | None = None,
+    search_strategy: dict[str, Any] | None = None,
+    query_generation_model: str | None = None,
+) -> tuple[list[str], str, list[dict[str, str]]]:
+    canonical_dict = canonical.as_dict()
+    canonical_dict["company_name"] = canonical.company_name or canonical.normalized_company_name
+    strategy = search_strategy or {}
+    if canonical.industry_hint and "search_hint_terms" in strategy and isinstance(strategy["search_hint_terms"], list):
+        strategy["search_hint_terms"] = list(dict.fromkeys(strategy["search_hint_terms"] + [canonical.industry_hint]))
+    return generate_queries_if_needed(
+        canonical=canonical_dict,
+        search_strategy=strategy,
+        custom_instructions=custom_instructions,
+        model_name=query_generation_model,
+    )
+
+
+def _is_location_only_query(query: str) -> bool:
+    tokens = re.findall(r"[a-z0-9]+", (query or "").lower())
+    return len(tokens) <= 3 and not any(t in {"official", "site"} for t in tokens)
+
+
+def _legacy_search_queries(canonical: CanonicalLeadRow, custom_instructions: str | None = None) -> list[str]:
     queries: list[str] = []
     base = " ".join(part for part in [canonical.company_name, canonical.city, canonical.state] if part).strip()
     if base:
@@ -181,13 +211,28 @@ def search_company_candidates(
     canonical: CanonicalLeadRow,
     max_results: int = 8,
     custom_instructions: str | None = None,
-) -> tuple[list[ResolutionCandidate], list[str], list[dict[str, Any]]]:
-    queries = _search_queries(canonical, custom_instructions=custom_instructions)
+    search_strategy: dict[str, Any] | None = None,
+    query_generation_model: str | None = None,
+) -> tuple[list[ResolutionCandidate], list[str], list[dict[str, Any]], str]:
+    queries, query_note, query_notes = _search_queries(
+        canonical,
+        custom_instructions=custom_instructions,
+        search_strategy=search_strategy,
+        query_generation_model=query_generation_model,
+    )
     trace: list[dict[str, Any]] = []
     candidates: dict[str, ResolutionCandidate] = {}
+    trace.append({"stage": "resolution.query_generation", "status": "ok", "message": query_note, "details": query_notes})
 
     headers = {"User-Agent": "LeadEnrichmentLocal/1.0 (+company-resolution)"}
     for query in queries:
+        ql = query.lower()
+        if not canonical.company_name or canonical.company_name.lower() not in ql:
+            trace.append({"stage": "resolution.search", "status": "skipped", "query": query, "reason": "missing_entity_name"})
+            continue
+        if _is_location_only_query(query):
+            trace.append({"stage": "resolution.search", "status": "skipped", "query": query, "reason": "location_only_query"})
+            continue
         encoded = quote_plus(query)
         url = f"https://duckduckgo.com/html/?q={encoded}"
         trace.append({"stage": "resolution.search", "status": "start", "query": query, "url": url})
@@ -235,7 +280,7 @@ def search_company_candidates(
                 existing.evidence.setdefault("queries", []).append(query)
         time.sleep(0.35)
 
-    return list(candidates.values())[:max_results], queries, trace
+    return list(candidates.values())[:max_results], queries, trace, query_note
 
 
 def validate_candidate_website(candidate: ResolutionCandidate, canonical: CanonicalLeadRow) -> ResolutionCandidate:
@@ -321,7 +366,12 @@ def score_resolution_candidate(candidate: ResolutionCandidate, canonical: Canoni
     return candidate
 
 
-def resolve_company_website(canonical: CanonicalLeadRow, custom_instructions: str | None = None) -> ResolutionResult:
+def resolve_company_website(
+    canonical: CanonicalLeadRow,
+    custom_instructions: str | None = None,
+    search_strategy: dict[str, Any] | None = None,
+    query_generation_model: str | None = None,
+) -> ResolutionResult:
     result = ResolutionResult()
     result.trace.append({"stage": "resolution.start", "status": "ok", "message": "Resolution stage started"})
 
@@ -361,8 +411,21 @@ def resolve_company_website(canonical: CanonicalLeadRow, custom_instructions: st
             result.trace.append({"stage": "resolution.selected", "status": "ok", "method": "email_domain", "domain": candidate.domain})
             return result
 
-    candidates, queries, search_trace = search_company_candidates(canonical, custom_instructions=custom_instructions)
+    if not (canonical.company_name or canonical.normalized_company_name):
+        result.resolution_status = "unresolved"
+        result.resolution_notes = "insufficient business identity for web resolution"
+        result.trace.append({"stage": "resolution.unresolved", "status": "ok", "reason": result.resolution_notes})
+        return result
+
+    candidates, queries, search_trace, query_note = search_company_candidates(
+        canonical,
+        custom_instructions=custom_instructions,
+        search_strategy=search_strategy,
+        query_generation_model=query_generation_model,
+    )
     result.search_queries = queries
+    if query_note:
+        result.resolution_notes = query_note
     result.trace.extend(search_trace)
 
     scored: list[ResolutionCandidate] = []

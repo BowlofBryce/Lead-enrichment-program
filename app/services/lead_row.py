@@ -67,6 +67,10 @@ class CanonicalLeadRow:
     state: str = ""
     location_text: str = ""
     address: str = ""
+    industry_hint: str = ""
+    notes_context: str = ""
+    alternate_entity_name: str = ""
+    postal_code: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return self.__dict__.copy()
@@ -239,6 +243,54 @@ def canonicalize_row(raw_row: dict[str, Any], mapping: dict[str, str]) -> Canoni
         row.company_name = row.company_domain.split(".")[0].replace("-", " ").title()
         row.normalized_company_name = clean_company_name(row.company_name)
 
+    return row
+
+
+def canonicalize_from_dynamic(dynamic: dict[str, Any]) -> CanonicalLeadRow:
+    row = CanonicalLeadRow(
+        first_name=str(dynamic.get("first_name", "") or "").strip(),
+        last_name=str(dynamic.get("last_name", "") or "").strip(),
+        full_name=str(dynamic.get("full_name", "") or "").strip(),
+        title=str(dynamic.get("title", "") or "").strip(),
+        company_name=str(dynamic.get("company_name", "") or "").strip(),
+        email=str(dynamic.get("email", "") or "").strip(),
+        phone=str(dynamic.get("phone", "") or "").strip(),
+        website=str(dynamic.get("website", "") or "").strip(),
+        company_domain=str(dynamic.get("company_domain", "") or "").strip(),
+        linkedin_url=str(dynamic.get("linkedin_url", "") or "").strip(),
+        city=str(dynamic.get("city", "") or "").strip(),
+        state=str(dynamic.get("state", "") or "").strip(),
+        location_text=str(dynamic.get("location_text", "") or "").strip(),
+        address=str(dynamic.get("address", "") or "").strip(),
+        industry_hint=str(dynamic.get("industry_hint", "") or "").strip(),
+        notes_context=str(dynamic.get("notes_context", "") or "").strip(),
+        alternate_entity_name=str(dynamic.get("alternate_entity_name", "") or "").strip(),
+        postal_code=str(dynamic.get("postal_code", "") or "").strip(),
+    )
+
+    if row.full_name and (not row.first_name or not row.last_name):
+        maybe_first, maybe_last = _split_name(row.full_name)
+        row.first_name = row.first_name or maybe_first
+        row.last_name = row.last_name or maybe_last
+    if not row.full_name and (row.first_name or row.last_name):
+        row.full_name = f"{row.first_name} {row.last_name}".strip()
+
+    row.first_name = _title_case(row.first_name)
+    row.last_name = _title_case(row.last_name)
+    row.normalized_full_name = _title_case(row.full_name)
+    row.normalized_title = _title_case(row.title)
+    row.normalized_company_name = clean_company_name(row.company_name)
+    row.normalized_email = row.email.lower().strip()
+    row.email_domain = row.normalized_email.split("@", 1)[1] if "@" in row.normalized_email else ""
+    row.normalized_phone = normalize_phone(row.phone)
+    row.website = normalize_url(row.website)
+    website_domain = normalize_domain(row.website)
+    row.company_domain = normalize_domain(row.company_domain or website_domain or row.email_domain)
+    if not row.location_text:
+        row.location_text = " ".join(part for part in [row.city, row.state] if part).strip()
+    if not row.company_name and row.company_domain:
+        row.company_name = row.company_domain.split(".")[0].replace("-", " ").title()
+        row.normalized_company_name = clean_company_name(row.company_name)
     return row
 
 

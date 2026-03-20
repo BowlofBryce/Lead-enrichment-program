@@ -16,9 +16,23 @@
       {% endif %}
       <label for="selected_model"><strong>Model for this run</strong></label>
       <select id="selected_model" name="selected_model">
-        <option value="">Use default ({{ default_model }})</option>
+        <option value="">Use default ({{ default_enrichment_model }})</option>
         {% for model in installed_models %}
           <option value="{{ model.name }}" {% if run.selected_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="schema_inference_model"><strong>Schema inference model</strong></label>
+      <select id="schema_inference_model" name="schema_inference_model">
+        <option value="">Use default ({{ default_schema_inference_model }})</option>
+        {% for model in installed_models %}
+          <option value="{{ model.name }}" {% if run.schema_inference_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="query_generation_model"><strong>Query generation model</strong></label>
+      <select id="query_generation_model" name="query_generation_model">
+        <option value="">Use default ({{ default_query_generation_model }})</option>
+        {% for model in installed_models %}
+          <option value="{{ model.name }}" {% if run.query_generation_model == model.name %}selected{% endif %}>{{ model.name }}</option>
         {% endfor %}
       </select>
 
@@ -32,13 +46,19 @@
 
 <section class="card">
   <h3>Run Config</h3>
-  <p><strong>Model used:</strong> {{ resolved_model }}</p>
+  <p><strong>Main enrichment model used:</strong> {{ resolved_model }}</p>
+  <p><strong>Schema inference model:</strong> {{ run.schema_inference_model or default_schema_inference_model }}</p>
+  <p><strong>Query generation model:</strong> {{ run.query_generation_model or default_query_generation_model }}</p>
   <p><strong>Model source:</strong> {{ "default fallback (.env/settings)" if used_default_model else "run-selected model" }}</p>
   {% if not used_default_model %}
     <p><strong>Configured default model:</strong> {{ default_model }}</p>
   {% endif %}
   <p><strong>Custom instructions:</strong></p>
   <pre>{{ run.custom_instructions or "(none)" }}</pre>
+  <p><strong>Schema inference output:</strong></p>
+  <pre>{{ run.schema_inference_json or "{}" }}</pre>
+  <p><strong>Run-level search strategy:</strong></p>
+  <pre>{{ run.search_strategy_json or "{}" }}</pre>
 </section>
 
 <section class="card">

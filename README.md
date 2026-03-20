@@ -232,3 +232,27 @@ uvicorn app.main:app --reload
 - This tool does not claim resolution success unless evidence passes threshold.
 
 Backward compatibility is preserved: CSVs with only company/site/location still run.
+
+
+## Dynamic schema-aware enrichment flow (new)
+
+Each run now uses three local model roles:
+- **Schema inference model (strong model, once per run):** infers semantic roles from arbitrary CSV headers + sample rows and emits a strict JSON parsing/transformation/search plan.
+- **Query generation model (light model):** used for unresolved rows to propose conservative query candidates.
+- **Main enrichment model:** used for enrichment/classification after resolution.
+
+The resolver now rejects location-only queries (e.g. `Edgewood MD`) and requires entity/business identity in company-resolution searches.
+
+### New run/lead observability
+- Run-level: schema inference JSON + search strategy JSON.
+- Lead-level: semantic row JSON, generated queries JSON, query-generation notes, candidate website scoring traces.
+
+### Model defaults in `.env`
+- `DEFAULT_ENRICHMENT_MODEL`
+- `DEFAULT_SCHEMA_INFERENCE_MODEL`
+- `DEFAULT_QUERY_GENERATION_MODEL`
+
+If your machine cannot handle 30B, choose smaller defaults (for example 8B/14B).
+
+## macOS full terminal setup
+See `INSTALL.md` for a beginner-friendly, from-scratch setup guide.

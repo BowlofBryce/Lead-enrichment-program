@@ -20,7 +20,11 @@ class EnrichmentRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    schema_inference_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    query_generation_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    schema_inference_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_strategy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="run", cascade="all,delete")
     csv_diagnostic: Mapped["CSVParseDiagnostic | None"] = relationship(
@@ -73,6 +77,7 @@ class Lead(Base):
     fields_missing_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fields_suspicious_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     provenance_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    semantic_row_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     enrichment_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     lead_quality_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -86,6 +91,8 @@ class Lead(Base):
     resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     candidate_websites_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_queries_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_generation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolution_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # company/site outputs

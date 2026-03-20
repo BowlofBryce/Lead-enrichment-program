@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./lead_enrichment.db"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3-coder:30b"
+    default_enrichment_model: str = "qwen3:14b"
+    default_schema_inference_model: str = "qwen3-coder:30b"
+    default_query_generation_model: str = "qwen3:8b"
     ollama_timeout_seconds: int = 45
     request_timeout_seconds: int = 20
 

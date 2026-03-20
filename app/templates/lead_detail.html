@@ -30,7 +30,14 @@
   <p>Status={{ lead.resolution_status or "" }}, method={{ lead.resolution_method or "" }}, confidence={{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }}</p>
   <p>Resolved website/domain: {{ lead.resolved_website or "" }} / {{ lead.resolved_domain or "" }}</p>
   <p>Notes: {{ lead.resolution_notes or "" }}</p>
+  <p>Generated queries: {{ lead.generated_queries_json or "[]" }}</p>
+  <p>Query generation notes: {{ lead.query_generation_notes or "" }}</p>
   <pre>{{ lead.candidate_websites_json or "[]" }}</pre>
+</section>
+
+<section class="card">
+  <h3>Semantic row (dynamic roles)</h3>
+  <pre>{{ lead.semantic_row_json or "{}" }}</pre>
 </section>
 
 <section class="card">

@@ -143,6 +143,9 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
             "ollama_models_error": models_state["error"],
             "ollama_reachable": models_state["reachable"],
             "default_model": settings.ollama_model,
+            "default_enrichment_model": settings.default_enrichment_model,
+            "default_schema_inference_model": settings.default_schema_inference_model,
+            "default_query_generation_model": settings.default_query_generation_model,
             "debug_mode": settings.debug_mode,
         },
     )
@@ -153,6 +156,8 @@ def start_run(
     run_id: int,
     background_tasks: BackgroundTasks,
     selected_model: str = Form(default=""),
+    schema_inference_model: str = Form(default=""),
+    query_generation_model: str = Form(default=""),
     custom_instructions: str = Form(default=""),
     db: Session = Depends(get_db),
 ):
@@ -163,17 +168,29 @@ def start_run(
         return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
     selected_model = selected_model.strip()
     custom_instructions = custom_instructions.strip()
-    if selected_model:
+    if selected_model or schema_inference_model or query_generation_model:
         model_state = _load_models_state()
         model_names = set(model_state["model_names"])
-        if model_names and selected_model not in model_names:
-            run.status = "failed"
-            run.error_message = f"Selected model '{selected_model}' is not installed."
-            run.selected_model = selected_model
-            run.custom_instructions = custom_instructions
-            db.commit()
-            return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+        for model_choice, label in [
+            (selected_model.strip(), "enrichment"),
+            (schema_inference_model.strip(), "schema_inference"),
+            (query_generation_model.strip(), "query_generation"),
+        ]:
+            if model_choice and model_names and model_choice not in model_names:
+                run.status = "failed"
+                run.error_message = f"Selected {label} model '{model_choice}' is not installed."
+                run.selected_model = selected_model.strip() or None
+                run.schema_inference_model = schema_inference_model.strip() or None
+                run.query_generation_model = query_generation_model.strip() or None
+                run.custom_instructions = custom_instructions
+                db.commit()
+                return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    selected_model = selected_model.strip()
+    schema_inference_model = schema_inference_model.strip()
+    query_generation_model = query_generation_model.strip()
     run.selected_model = selected_model or None
+    run.schema_inference_model = schema_inference_model or None
+    run.query_generation_model = query_generation_model or None
     run.custom_instructions = custom_instructions or None
     run.error_message = None
     db.commit()
@@ -197,7 +214,7 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     used_default_model = not bool((run.selected_model or "").strip())
-    resolved_model = run.selected_model or settings.ollama_model
+    resolved_model = run.selected_model or settings.default_enrichment_model or settings.ollama_model
     models_state = _load_models_state()
     return templates.TemplateResponse(
         "run_detail.html",
@@ -208,6 +225,9 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
             "resolved_model": resolved_model,
             "used_default_model": used_default_model,
             "default_model": settings.ollama_model,
+            "default_enrichment_model": settings.default_enrichment_model,
+            "default_schema_inference_model": settings.default_schema_inference_model,
+            "default_query_generation_model": settings.default_query_generation_model,
             "installed_models": models_state["models"],
             "ollama_reachable": models_state["reachable"],
             "ollama_models_error": models_state["error"],
