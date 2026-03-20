@@ -4,7 +4,24 @@
   <h2>Apollo-style CSV Preview (Run #{{ run.id }})</h2>
   <p><strong>Original file:</strong> {{ run.filename }}</p>
   <p><strong>Detected rows:</strong> {{ diagnostic.detected_row_count }}</p>
-  <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Row Enrichment</button></form>
+  {% if not ollama_reachable %}
+    <p><strong>Ollama status:</strong> <span class="status status-failed">Unavailable</span> — {{ ollama_models_error }}</p>
+  {% endif %}
+  <form action="/runs/{{ run.id }}/start" method="post">
+    <label for="selected_model"><strong>Model for this run</strong></label>
+    <select id="selected_model" name="selected_model">
+      <option value="">Use default ({{ default_model }})</option>
+      {% for model in installed_models %}
+        <option value="{{ model.name }}" {% if run.selected_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+      {% endfor %}
+    </select>
+    <p class="small">Day-to-day model selection happens here. .env remains default fallback only.</p>
+
+    <label for="custom_instructions"><strong>Run-level custom instructions</strong></label>
+    <textarea id="custom_instructions" name="custom_instructions" rows="6" placeholder="Optional guidance for resolution/classification.">{{ run.custom_instructions or "" }}</textarea>
+    <p class="small">These are guidance hints only. Core conservative/no-hallucination rules still apply.</p>
+    <button type="submit">Start Row Enrichment</button>
+  </form>
 </section>
 
 <section class="card">

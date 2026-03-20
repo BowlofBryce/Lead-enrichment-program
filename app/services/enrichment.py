@@ -14,6 +14,7 @@ from app.services.extract import extract_from_pages
 from app.services.lead_row import analyze_row, canonicalize_row, compute_scores, resolve_anchor, to_json
 from app.services.logging_utils import get_logger
 from app.services.normalize import dedupe_key, normalize_domain, normalize_url
+from app.services.ollama_client import list_models
 from app.services.resolution import resolve_company_website
 from app.settings import settings
 
@@ -75,6 +76,35 @@ def process_run(db: Session, run_id: int) -> None:
     if not run:
         return
     logger.info("enrichment.run.started", extra_fields={"run_id": run.id, "filename": run.filename})
+    selected_model = (run.selected_model or "").strip()
+    custom_instructions = (run.custom_instructions or "").strip()
+    model_to_use = selected_model or settings.ollama_model
+    used_default_model = not bool(selected_model)
+    if selected_model:
+        try:
+            installed_models = {m.name for m in list_models()}
+            if selected_model not in installed_models:
+                run.status = "failed"
+                run.error_message = f"Selected model '{selected_model}' is not installed in local Ollama."
+                db.commit()
+                logger.warning("enrichment.run.model_missing", extra_fields={"run_id": run.id, "selected_model": selected_model})
+                return
+        except Exception as exc:
+            run.status = "failed"
+            run.error_message = f"Unable to verify selected model '{selected_model}': {exc}"
+            db.commit()
+            logger.exception("enrichment.run.model_check_failed", extra_fields={"run_id": run.id, "selected_model": selected_model})
+            return
+    logger.info(
+        "enrichment.run.config",
+        extra_fields={
+            "run_id": run.id,
+            "selected_model": selected_model,
+            "used_default_model": used_default_model,
+            "model_in_use": model_to_use,
+            "custom_instructions": custom_instructions[:400],
+        },
+    )
     run.status = "processing"
     db.commit()
 
@@ -92,7 +122,7 @@ def process_run(db: Session, run_id: int) -> None:
             raw_row = json.loads(lead.original_row_json or "{}")
             canonical = canonicalize_row(raw_row, header_mapping)
             analysis = analyze_row(canonical)
-            resolution = resolve_company_website(canonical)
+            resolution = resolve_company_website(canonical, custom_instructions=custom_instructions)
 
             for event in resolution.trace:
                 _add_debug_event(
@@ -281,7 +311,12 @@ def process_run(db: Session, run_id: int) -> None:
                 # only classify when we have enough crawl text
                 combined_text = " ".join([p.text for p in good_pages if p.text])[:6000]
                 if len(combined_text) > 600:
-                    classification = classify_business(combined_text, extraction.has_contact_form)
+                    classification = classify_business(
+                        combined_text,
+                        extraction.has_contact_form,
+                        model_name=model_to_use,
+                        custom_instructions=custom_instructions,
+                    )
                     db.add(
                         LeadClassification(
                             lead_id=lead.id,

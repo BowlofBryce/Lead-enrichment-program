@@ -2,6 +2,15 @@
 
 Local-first FastAPI + Jinja2 + SQLite lead row enrichment for Apollo-like CSV exports. No paid APIs, no cloud dependencies.
 
+## New local model controls (no day-to-day `.env` edits)
+
+You can now control model behavior from the UI per enrichment run:
+- choose any installed local Ollama model on the CSV preview page,
+- add run-level custom instructions (operator guidance),
+- manage local models from a dedicated `/models` page.
+
+`.env`/settings still provide the **default fallback model**, but daily switching should happen in-app.
+
 ## What changed
 
 The product is now **row-first** instead of website-first. For each CSV row, it now:
@@ -135,6 +144,43 @@ Deterministic first:
 - `/leads/{id}`: original row, canonical row, analysis, provenance, debug trace
 - `/debug/health`: DB + Ollama + directory checks
 - `/debug/llm`: local manual Ollama test UI
+- `/models`: list/pull/create local Ollama models and presets
+
+## Per-run model selection and custom instructions
+
+On `/runs/{id}/preview`, before starting enrichment:
+1. Pick **Model for this run** from currently installed Ollama models.
+2. Optionally add **Run-level custom instructions**.
+3. Start the run.
+
+Behavior:
+- If a model is selected, that model is used for the run’s LLM classification calls.
+- If no model is selected, the app falls back to `OLLAMA_MODEL` from settings/.env.
+- Run instructions are appended as run context/hints (not full prompt replacement).
+- Core safety rules stay intact: conservative outputs, no hallucinated fields, uncertainty is explicit.
+
+If a selected model is missing at run start, the run fails gracefully with a clear error on the run detail page.
+
+## Models page (`/models`)
+
+The local models page includes:
+- live installed model list from Ollama (`name`, `size`, `modified`),
+- Ollama connectivity status,
+- pull form for new models,
+- local preset model creation form.
+
+### Pulling models
+
+- Use the **Pull Model** form with a model name (e.g. `qwen3:14b`, `qwen3:8b`, `mistral-small3.2`).
+- Pulling an already-installed model is safe; Ollama handles this idempotently.
+- After pull/create actions, the page can be refreshed to see the latest installed list.
+
+### Preset model creation
+
+Use **Create Local Preset Model** to derive a local model from a base model with custom system instructions.
+- Example: base `qwen3:14b` + preset name `qwen3:14b-tattoo`.
+- Presets are local-only via Ollama’s create API.
+- If create fails (invalid name/instructions/Ollama error), the UI shows a clear error message.
 
 ## Setup
 
@@ -148,6 +194,8 @@ ollama serve
 ollama pull qwen3-coder:30b
 uvicorn app.main:app --reload
 ```
+
+> `.env` model config is fallback default only. Use `/models` + run preview selection for day-to-day model switching.
 
 ## End-to-end run
 

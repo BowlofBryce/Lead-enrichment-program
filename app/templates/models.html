@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Local Ollama Models</h2>
+  <p><a href="/">Back to Home</a></p>
+  <p><strong>Ollama status:</strong>
+    {% if ollama_reachable %}
+      <span class="status status-completed">Connected</span>
+    {% else %}
+      <span class="status status-failed">Unavailable</span> — {{ ollama_models_error }}
+    {% endif %}
+  </p>
+  <p><strong>Default fallback model:</strong> {{ default_model }}</p>
+  {% if flash_message %}<p><strong>Message:</strong> {{ flash_message }}</p>{% endif %}
+  {% if flash_error %}<p><strong>Error:</strong> {{ flash_error }}</p>{% endif %}
+</section>
+
+<section class="card">
+  <h3>Installed Models</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Size (bytes)</th><th>Modified</th></tr></thead>
+    <tbody>
+      {% for model in installed_models %}
+      <tr>
+        <td>{{ model.name }}{% if model.name == default_model %} <strong>(default)</strong>{% endif %}</td>
+        <td>{{ model.size if model.size is not none else "" }}</td>
+        <td>{{ model.modified_at }}</td>
+      </tr>
+      {% endfor %}
+      {% if not installed_models %}
+      <tr><td colspan="3">No models found.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  <p><a href="/models">Refresh model list</a></p>
+</section>
+
+<section class="card">
+  <h3>Pull New Model</h3>
+  <form action="/models/pull" method="post">
+    <label for="model_name">Model name</label>
+    <input id="model_name" name="model_name" placeholder="qwen3:14b" required>
+    <button type="submit">Pull Model</button>
+  </form>
+  <p class="small">Pulling an already-installed model is safe; Ollama handles deduplication.</p>
+</section>
+
+<section class="card">
+  <h3>Create Local Preset Model</h3>
+  <form action="/models/create-preset" method="post">
+    <label for="base_model">Base model</label>
+    <select id="base_model" name="base_model" required>
+      {% for model in installed_models %}
+        <option value="{{ model.name }}">{{ model.name }}</option>
+      {% endfor %}
+    </select>
+    <label for="preset_name">Preset model name</label>
+    <input id="preset_name" name="preset_name" placeholder="qwen3:14b-tattoo" required>
+    <label for="system_prompt">Preset system instructions</label>
+    <textarea id="system_prompt" name="system_prompt" rows="6" required></textarea>
+    <button type="submit">Create Preset</button>
+  </form>
+</section>
+{% endblock %}

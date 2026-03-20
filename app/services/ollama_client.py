@@ -26,6 +26,13 @@ class OllamaResult:
     raw_payload: dict[str, Any]
 
 
+@dataclass
+class OllamaModelInfo:
+    name: str
+    size: int | None = None
+    modified_at: str = ""
+
+
 def _extract_json_object(text: str) -> tuple[dict, str, str]:
     text = text.strip()
     if not text:
@@ -48,28 +55,54 @@ def _extract_json_object(text: str) -> tuple[dict, str, str]:
     return {}, parse_error, repaired
 
 
-def check_ollama_health() -> dict[str, Any]:
-    out = {"reachable": False, "model_available": False, "error": "", "models": []}
-    try:
-        tags_resp = requests.get(f"{settings.ollama_base_url}/api/tags", timeout=8)
-        tags_resp.raise_for_status()
-        payload = tags_resp.json()
-        models = [m.get("name", "") for m in payload.get("models", [])]
-        out["reachable"] = True
-        out["models"] = models
-        out["model_available"] = any(m == settings.ollama_model or m.startswith(f"{settings.ollama_model}:") for m in models)
-        return out
-    except Exception as exc:
-        out["error"] = str(exc)
-        return out
+def list_models() -> list[OllamaModelInfo]:
+    resp = requests.get(f"{settings.ollama_base_url}/api/tags", timeout=8)
+    resp.raise_for_status()
+    payload = resp.json()
+    models: list[OllamaModelInfo] = []
+    for item in payload.get("models", []):
+        name = str(item.get("name", "") or "").strip()
+        if not name:
+            continue
+        size = item.get("size")
+        size_value = int(size) if isinstance(size, (int, float)) else None
+        models.append(
+            OllamaModelInfo(
+                name=name,
+                size=size_value,
+                modified_at=str(item.get("modified_at", "") or ""),
+            )
+        )
+    return sorted(models, key=lambda m: m.name.lower())
+
+
+def pull_model(model_name: str) -> dict[str, Any]:
+    payload = {"name": model_name, "stream": False}
+    resp = requests.post(
+        f"{settings.ollama_base_url}/api/pull",
+        json=payload,
+        timeout=settings.ollama_timeout_seconds,
+    )
+    resp.raise_for_status()
+    return resp.json() if resp.content else {"status": "ok"}
+
+
+def create_model_preset(base_model: str, preset_name: str, system_prompt: str) -> dict[str, Any]:
+    modelfile = f'FROM {base_model}\n\nSYSTEM """\n{system_prompt.strip()}\n"""'
+    payload = {"name": preset_name, "modelfile": modelfile, "stream": False}
+    resp = requests.post(
+        f"{settings.ollama_base_url}/api/create",
+        json=payload,
+        timeout=settings.ollama_timeout_seconds,
+    )
+    resp.raise_for_status()
+    return resp.json() if resp.content else {"status": "ok"}
+
 
 def check_ollama_health() -> dict[str, Any]:
     out = {"reachable": False, "model_available": False, "error": "", "models": []}
     try:
-        tags_resp = requests.get(f"{settings.ollama_base_url}/api/tags", timeout=8)
-        tags_resp.raise_for_status()
-        payload = tags_resp.json()
-        models = [m.get("name", "") for m in payload.get("models", [])]
+        models = [m.name for m in list_models()]
         out["reachable"] = True
         out["models"] = models
         out["model_available"] = any(m == settings.ollama_model or m.startswith(f"{settings.ollama_model}:") for m in models)
@@ -85,6 +118,7 @@ def generate(
     temperature: float | None = None,
     max_tokens: int | None = None,
     expect_json: bool = False,
+    model: str | None = None,
 ) -> OllamaResult:
     last_error = ""
     last_parse_error = ""
@@ -92,8 +126,9 @@ def generate(
     repaired = ""
     last_payload: dict[str, Any] = {}
 
+    model_name = (model or settings.ollama_model).strip()
     request_payload: dict[str, Any] = {
-        "model": settings.ollama_model,
+        "model": model_name,
         "prompt": prompt,
         "stream": False,
     }
@@ -114,7 +149,7 @@ def generate(
         try:
             logger.info(
                 "ollama.request.started",
-                extra_fields={"model": settings.ollama_model, "prompt_len": len(prompt), "expect_json": expect_json},
+                extra_fields={"model": model_name, "prompt_len": len(prompt), "expect_json": expect_json},
             )
             resp = requests.post(
                 f"{settings.ollama_base_url}/api/generate",
@@ -160,6 +195,7 @@ def generate_json(
     system: str = "",
     temperature: float | None = None,
     max_tokens: int | None = None,
+    model: str | None = None,
 ) -> OllamaResult:
     return generate(
         prompt=prompt,
@@ -168,4 +204,5 @@ def generate_json(
         temperature=temperature,
         max_tokens=max_tokens,
         expect_json=True,
+        model=model,
     )

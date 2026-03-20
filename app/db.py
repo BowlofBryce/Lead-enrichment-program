@@ -91,6 +91,10 @@ def run_sqlite_migrations() -> None:
         },
         "csv_parse_diagnostics": {},
         "lead_debug_events": {},
+        "enrichment_runs": {
+            "selected_model": "VARCHAR(120)",
+            "custom_instructions": "TEXT",
+        },
     }
     with engine.begin() as conn:
         for table_name, columns in migration_columns.items():
