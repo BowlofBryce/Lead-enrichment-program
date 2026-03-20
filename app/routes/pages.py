@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -13,7 +14,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import SessionLocal, get_db
-from app.models import CSVParseDiagnostic, EnrichmentRun, Lead, LeadDebugEvent
+from app.models import CSVParseDiagnostic, EnrichmentRun, EnrichmentRunEvent, Lead, LeadDebugEvent
 from app.services.csv_utils import EXPECTED_COLUMNS, export_leads_to_csv, inspect_upload_csv, lead_to_export_row
 from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
@@ -75,7 +76,7 @@ async def upload_csv(
         logger.exception("csv.upload.failed", extra_fields={"filename": file.filename})
         raise HTTPException(status_code=400, detail=f"Malformed CSV: {exc}") from exc
 
-    run = EnrichmentRun(filename=file.filename, status="pending", total_rows=inspection.detected_row_count, processed_rows=0)
+    run = EnrichmentRun(filename=file.filename, status="queued", total_rows=inspection.detected_row_count, processed_rows=0)
     db.add(run)
     db.flush()
 
@@ -164,7 +165,7 @@ def start_run(
     run = db.get(EnrichmentRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.status in {"processing", "completed"}:
+    if run.status in {"running", "resuming", "completed"}:
         return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
     selected_model = selected_model.strip()
     custom_instructions = custom_instructions.strip()
@@ -193,8 +194,59 @@ def start_run(
     run.query_generation_model = query_generation_model or None
     run.custom_instructions = custom_instructions or None
     run.error_message = None
+    run.status = "queued"
+    run.pause_requested = False
     db.commit()
     logger.info("enrichment.run.enqueue", extra_fields={"run_id": run.id})
+    background_tasks.add_task(_run_in_background, run.id)
+    return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+
+
+@router.post("/runs/{run_id}/pause")
+def pause_run(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(EnrichmentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in {"running", "resuming"}:
+        return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    run.pause_requested = True
+    run.status = "paused"
+    run.current_action_message = "Paused requested. Finishing current record safely."
+    db.add(
+        EnrichmentRunEvent(
+            run_id=run.id,
+            event_type="run_state",
+            machine_status="paused",
+            human_message="Paused requested. Finishing current record safely.",
+            severity="info",
+        )
+    )
+    db.commit()
+    return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    run = db.get(EnrichmentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status in {"running", "resuming"}:
+        return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    if run.status != "paused":
+        return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    run.status = "resuming"
+    run.pause_requested = False
+    run.current_action_message = "Resuming run from last saved progress."
+    db.add(
+        EnrichmentRunEvent(
+            run_id=run.id,
+            event_type="run_state",
+            machine_status="resuming",
+            human_message="Resuming run from last saved progress.",
+            severity="info",
+        )
+    )
+    db.commit()
     background_tasks.add_task(_run_in_background, run.id)
     return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
 
@@ -282,6 +334,63 @@ def run_progress_api(run_id: int, db: Session = Depends(get_db)):
             "processed_rows": run.processed_rows,
             "total_rows": run.total_rows,
             "leads": lead_rows,
+        }
+    )
+
+
+@router.get("/api/runs/{run_id}/live")
+def run_live_api(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(EnrichmentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    recent_events = (
+        db.query(EnrichmentRunEvent)
+        .filter(EnrichmentRunEvent.run_id == run.id)
+        .order_by(EnrichmentRunEvent.created_at.desc())
+        .limit(25)
+        .all()
+    )
+    completed = max(run.processed_rows, 0)
+    total = max(run.total_rows, 0)
+    remaining = max(total - completed, 0)
+    elapsed = 0.0
+    if run.started_at:
+        end_time = run.completed_at or datetime.utcnow()
+        elapsed = max((end_time - run.started_at).total_seconds(), 0.0)
+    rate = (completed / elapsed) if elapsed > 0 else 0.0
+    eta_seconds = int(remaining / rate) if rate > 0 else None
+    in_flight = (
+        db.query(Lead)
+        .filter(Lead.run_id == run.id, Lead.enrichment_status == "processing")
+        .order_by(Lead.id.asc())
+        .first()
+    )
+    return JSONResponse(
+        {
+            "run_id": run.id,
+            "status": run.status,
+            "current_action": run.current_action_message or "Waiting to start run.",
+            "total_records": total,
+            "records_completed": completed,
+            "records_remaining": remaining,
+            "success_count": run.success_count,
+            "failed_count": run.failed_count,
+            "skipped_count": run.skipped_count,
+            "processing_rate_per_sec": round(rate, 2),
+            "eta_seconds": eta_seconds,
+            "currently_processing": in_flight.id if in_flight else None,
+            "recent_events": [
+                {
+                    "id": evt.id,
+                    "event_type": evt.event_type,
+                    "machine_status": evt.machine_status,
+                    "human_message": evt.human_message,
+                    "severity": evt.severity,
+                    "lead_id": evt.lead_id,
+                    "timestamp": evt.created_at.isoformat(),
+                }
+                for evt in recent_events
+            ],
         }
     )
 

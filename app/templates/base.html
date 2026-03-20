@@ -7,18 +7,23 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="container">
-    <h1><a href="/">Lead Enrichment Local</a></h1>
-    <p>Local-first enrichment using public web data + Ollama.</p>
-    <nav>
-      <a href="/">Home</a> |
-      <a href="/models">Models</a> |
-      <a href="/debug/llm">LLM Debug</a> |
-      <a href="/debug/health">Health</a>
-      {% if debug_mode %}<span class="badge">DEBUG_MODE ON</span>{% endif %}
+  <div class="app-shell"></div>
+  <header class="container app-header">
+    <div class="brand-row">
+      <div>
+        <h1><a href="/">Lead Enrichment Local</a></h1>
+        <p class="muted">Run local enrichment pipelines with transparent live progress.</p>
+      </div>
+      {% if debug_mode %}<span class="badge">DEBUG MODE</span>{% endif %}
+    </div>
+    <nav class="top-nav">
+      <a href="/">Dashboard</a>
+      <a href="/models">Models</a>
+      <a href="/debug/llm">LLM Debug</a>
+      <a href="/debug/health">System Health</a>
     </nav>
   </header>
-  <main class="container">
+  <main class="container page-content">
     {% block content %}{% endblock %}
   </main>
 </body>

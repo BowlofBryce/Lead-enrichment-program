@@ -94,6 +94,14 @@ def run_sqlite_migrations() -> None:
         },
         "csv_parse_diagnostics": {},
         "lead_debug_events": {},
+        "enrichment_run_events": {
+            "lead_id": "INTEGER",
+            "event_type": "VARCHAR(60)",
+            "machine_status": "VARCHAR(50)",
+            "human_message": "TEXT",
+            "severity": "VARCHAR(16)",
+            "payload_json": "TEXT",
+        },
         "enrichment_runs": {
             "selected_model": "VARCHAR(120)",
             "schema_inference_model": "VARCHAR(120)",
@@ -101,6 +109,13 @@ def run_sqlite_migrations() -> None:
             "custom_instructions": "TEXT",
             "schema_inference_json": "TEXT",
             "search_strategy_json": "TEXT",
+            "success_count": "INTEGER DEFAULT 0",
+            "failed_count": "INTEGER DEFAULT 0",
+            "skipped_count": "INTEGER DEFAULT 0",
+            "pause_requested": "BOOLEAN DEFAULT 0",
+            "current_action_message": "TEXT",
+            "started_at": "DATETIME",
+            "resumed_at": "DATETIME",
         },
     }
     with engine.begin() as conn:
