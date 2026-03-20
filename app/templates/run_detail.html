@@ -13,27 +13,23 @@
 </section>
 
 <section class="card">
-  <h2>Leads</h2>
+  <h2>Lead Rows</h2>
   <table>
     <thead>
       <tr>
-        <th>ID</th><th>Input</th><th>Normalized</th><th>Pages/Fetch</th><th>Extraction</th><th>Classification</th><th>Score</th><th>Status</th><th>Error</th>
+        <th>ID</th><th>Person/Company</th><th>Anchor</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
       </tr>
     </thead>
     <tbody>
       {% for lead in run.leads %}
       <tr>
         <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
-        <td>{{ lead.original_company_name }}<br>{{ lead.original_website }}</td>
-        <td>{{ lead.cleaned_company_name or "" }}<br>{{ lead.normalized_domain or "" }}</td>
-        <td>{{ lead.pages|length }} pages
-          {% for p in lead.pages %}<div>{{ p.page_type }}: {{ p.fetch_status }}</div>{% endfor %}
-        </td>
-        <td>{{ lead.public_email or "" }} / {{ lead.public_phone or "" }}</td>
-        <td>{{ lead.business_type or "" }}<br>{{ lead.short_summary or "" }}</td>
-        <td>{{ lead.fit_score if lead.fit_score is not none else "" }}</td>
-        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></td>
-        <td>{{ lead.enrichment_error or "" }}</td>
+        <td>{{ lead.normalized_full_name or lead.full_name or "" }}<br>{{ lead.normalized_company_name or lead.company_name or "" }}<br>{{ lead.normalized_title or lead.title or "" }}</td>
+        <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}</td>
+        <td>missing={{ lead.fields_missing_json or "[]" }}<br>suspicious={{ lead.fields_suspicious_json or "[]" }}</td>
+        <td>{{ lead.business_type or "" }}<br>{{ lead.public_company_email or "" }} / {{ lead.public_company_phone or "" }}</td>
+        <td>enrich={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}<br>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score if lead.lead_quality_score is not none else "" }}</td>
+        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span><br>{{ lead.enrichment_error or "" }}</td>
       </tr>
       {% endfor %}
     </tbody>

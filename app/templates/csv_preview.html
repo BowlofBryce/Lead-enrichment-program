@@ -1,25 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>CSV Parse Inspector (Run #{{ run.id }})</h2>
+  <h2>Apollo-style CSV Preview (Run #{{ run.id }})</h2>
   <p><strong>Original file:</strong> {{ run.filename }}</p>
   <p><strong>Detected rows:</strong> {{ diagnostic.detected_row_count }}</p>
-  <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Enrichment</button></form>
+  <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Row Enrichment</button></form>
 </section>
 
 <section class="card">
-  <h3>Headers</h3>
+  <h3>Header Mapping</h3>
   <p><strong>Original headers:</strong> {{ original_headers }}</p>
-  <p><strong>Normalized headers:</strong> {{ normalized_headers }}</p>
+  <p><strong>Mapped canonical headers:</strong> {{ normalized_headers }}</p>
   <table>
-    <thead><tr><th>Internal Field</th><th>Mapped CSV Column</th></tr></thead>
+    <thead><tr><th>Canonical Field</th><th>Mapped CSV Column</th></tr></thead>
     <tbody>
       {% for field, source in header_mapping.items() %}
       <tr><td>{{ field }}</td><td>{{ source if source else "(missing)" }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  <p><strong>Found required/supported columns:</strong> {{ found_columns }}</p>
+  <p><strong>Found columns:</strong> {{ found_columns }}</p>
   <p><strong>Missing columns:</strong> {{ missing_columns }}</p>
   {% if warnings %}
     <h4>Warnings</h4>
@@ -28,9 +28,9 @@
 </section>
 
 <section class="card">
-  <h3>First 10 Parsed Rows</h3>
+  <h3>Parsed Rows (first 10)</h3>
   <pre>{{ preview_rows }}</pre>
-  <h3>Cleaned Preview</h3>
+  <h3>Canonical + Analysis Preview</h3>
   <pre>{{ cleaned_preview_rows }}</pre>
 </section>
 {% endblock %}

@@ -76,16 +76,19 @@ async def upload_csv(
         )
     )
 
+    mapping = inspection.header_mapping
     for _, row in inspection.dataframe.iterrows():
+        raw = {k: str(v or "") for k, v in row.to_dict().items()}
         db.add(
             Lead(
                 run_id=run.id,
-                original_company_name=str(row.get("company_name", "") or ""),
-                original_website=str(row.get("website", "") or ""),
-                original_city=str(row.get("city", "") or ""),
-                original_state=str(row.get("state", "") or ""),
-                original_phone=str(row.get("phone", "") or ""),
-                original_email=str(row.get("email", "") or ""),
+                original_row_json=json.dumps(raw),
+                original_company_name=raw.get(mapping.get("company_name", ""), ""),
+                original_website=raw.get(mapping.get("website", ""), ""),
+                original_city=raw.get(mapping.get("city", ""), ""),
+                original_state=raw.get(mapping.get("state", ""), ""),
+                original_phone=raw.get(mapping.get("phone", ""), ""),
+                original_email=raw.get(mapping.get("email", ""), ""),
                 enrichment_status="pending",
             )
         )
@@ -165,7 +168,12 @@ def export_run(run_id: int, db: Session = Depends(get_db)):
         .order_by(Lead.id.asc())
         .all()
     )
-    rows = [lead_to_export_row(lead) for lead in leads]
+    rows = []
+    for lead in leads:
+        row = lead_to_export_row(lead)
+        original = _json_obj(lead.original_row_json)
+        row.update(original)
+        rows.append(row)
     output_path = Path("data/exports") / f"run_{run.id}_enriched.csv"
     try:
         export_leads_to_csv(rows, output_path)
@@ -235,6 +243,11 @@ def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
             "classification": classification_dict,
             "debug_events": sorted(lead.debug_events, key=lambda e: e.created_at),
             "debug_mode": settings.debug_mode,
+            "original_row": _json_obj(lead.original_row_json),
+            "present": _json_list(lead.fields_present_json),
+            "missing": _json_list(lead.fields_missing_json),
+            "suspicious": _json_list(lead.fields_suspicious_json),
+            "provenance": _json_obj(lead.provenance_json),
         },
     )
 
@@ -319,23 +332,28 @@ def health_page(request: Request, db: Session = Depends(get_db)):
     except Exception as exc:
         db_status = "failed"
         db_error = str(exc)
-    run_count = db.query(func.count(EnrichmentRun.id)).scalar() or 0
-    uploads_ok = Path("data/uploads").exists() and Path("data/uploads").is_dir()
-    exports_ok = Path("data/exports").exists() and Path("data/exports").is_dir()
-    ollama_health = check_ollama_health()
+
+    uploads_dir = Path("data/uploads")
+    exports_dir = Path("data/exports")
+    pages_dir = Path("data/pages")
+
     return templates.TemplateResponse(
         "debug_health.html",
         {
             "request": request,
-            "app_status": "ok",
+            "debug_mode": settings.debug_mode,
             "db_status": db_status,
             "db_error": db_error,
-            "ollama_health": ollama_health,
-            "ollama_model": settings.ollama_model,
-            "uploads_ok": uploads_ok,
-            "exports_ok": exports_ok,
-            "run_count": run_count,
-            "debug_mode": settings.debug_mode,
+            "run_count": db.query(func.count(EnrichmentRun.id)).scalar() or 0,
+            "lead_count": db.query(func.count(Lead.id)).scalar() or 0,
+            "event_count": db.query(func.count(LeadDebugEvent.id)).scalar() or 0,
+            "ollama": check_ollama_health(),
+            "uploads_dir": str(uploads_dir.resolve()),
+            "uploads_exists": uploads_dir.exists(),
+            "exports_dir": str(exports_dir.resolve()),
+            "exports_exists": exports_dir.exists(),
+            "pages_dir": str(pages_dir.resolve()),
+            "pages_exists": pages_dir.exists(),
         },
     )
 
@@ -344,8 +362,8 @@ def _json_list(value: str | None) -> list:
     if not value:
         return []
     try:
-        parsed = json.loads(value)
-        return parsed if isinstance(parsed, list) else []
+        data = json.loads(value)
+        return data if isinstance(data, list) else []
     except json.JSONDecodeError:
         return []
 
@@ -354,7 +372,7 @@ def _json_obj(value: str | None) -> dict:
     if not value:
         return {}
     try:
-        parsed = json.loads(value)
-        return parsed if isinstance(parsed, dict) else {}
+        data = json.loads(value)
+        return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}

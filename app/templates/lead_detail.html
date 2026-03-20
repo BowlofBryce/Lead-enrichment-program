@@ -1,18 +1,47 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Lead #{{ lead.id }}</h2>
+  <h2>Lead Row #{{ lead.id }}</h2>
   <p><strong>Run:</strong> <a href="/runs/{{ lead.run_id }}">{{ lead.run_id }}</a></p>
   <p><strong>Status:</strong> <span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span></p>
-  <p><strong>Fit score:</strong> {{ lead.fit_score if lead.fit_score is not none else "" }}</p>
+  <p><strong>Anchor:</strong> {{ lead.anchor_type or "" }} → {{ lead.anchor_value or "" }}</p>
 </section>
 
 <section class="card">
-  <h3>Input + Normalized</h3>
+  <h3>Original Input Row</h3>
+  <pre>{{ original_row }}</pre>
+</section>
+
+<section class="card">
+  <h3>Normalized Canonical Row</h3>
   <ul>
-    <li>Original: {{ lead.original_company_name }} | {{ lead.original_website }} | {{ lead.original_city }} {{ lead.original_state }} | {{ lead.original_phone }} | {{ lead.original_email }}</li>
-    <li>Normalized: {{ lead.cleaned_company_name }} | {{ lead.normalized_domain }} | {{ lead.city }} {{ lead.state }} | {{ lead.normalized_phone }}</li>
+    <li>Name: {{ lead.normalized_full_name }} ({{ lead.first_name }} {{ lead.last_name }})</li>
+    <li>Title: {{ lead.normalized_title }}</li>
+    <li>Company: {{ lead.normalized_company_name }} | {{ lead.company_domain }} | {{ lead.website }}</li>
+    <li>Contact: {{ lead.normalized_email }} | {{ lead.normalized_phone }} | LinkedIn {{ lead.linkedin_url }}</li>
+    <li>Location: {{ lead.city }} {{ lead.state }} | {{ lead.location_text }}</li>
   </ul>
+</section>
+
+<section class="card">
+  <h3>Row Analysis</h3>
+  <p><strong>Present:</strong> {{ present }}</p>
+  <p><strong>Missing:</strong> {{ missing }}</p>
+  <p><strong>Suspicious:</strong> {{ suspicious }}</p>
+  <p><strong>Validation notes:</strong> {{ lead.validation_notes or "" }}</p>
+</section>
+
+<section class="card">
+  <h3>Company Enrichment + Person-aware checks</h3>
+  <p>{{ lead.business_type or "" }} | {{ lead.short_summary or "" }}</p>
+  <p>Public company contacts: {{ lead.public_company_email or "" }} / {{ lead.public_company_phone or "" }}</p>
+  <p>Pages: contact={{ lead.contact_page_url or "" }}, about={{ lead.about_page_url or "" }}, team={{ lead.team_page_url or "" }}</p>
+</section>
+
+<section class="card">
+  <h3>Scores + Provenance</h3>
+  <p>enrichment_confidence={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}, person_match={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}, company_match={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}, lead_quality_score={{ lead.lead_quality_score if lead.lead_quality_score is not none else "" }}</p>
+  <pre>{{ provenance }}</pre>
 </section>
 
 <section class="card">
@@ -35,13 +64,9 @@
   </table>
 </section>
 
-<section class="card"><h3>Extraction Summary</h3><pre>{{ extraction }}</pre></section>
-<section class="card"><h3>Classification Summary</h3><pre>{{ classification }}</pre></section>
-<section class="card"><h3>Error</h3><p>{{ lead.enrichment_error or "None" }}</p></section>
-
 {% if debug_mode %}
 <section class="card">
-  <h3>Per-lead Processing Trace</h3>
+  <h3>Debug Trace</h3>
   <table>
     <thead><tr><th>Time</th><th>Stage</th><th>Status</th><th>Message</th><th>Payload</th></tr></thead>
     <tbody>
