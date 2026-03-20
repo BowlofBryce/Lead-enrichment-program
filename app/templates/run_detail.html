@@ -69,26 +69,36 @@
 
 <section class="card">
   <h3>Lead Rows</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th><th>Person/Company</th><th>Anchor + Resolution</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
-      </tr>
-    </thead>
-    <tbody id="lead-rows-body">
-      {% for lead in run.leads %}
-      <tr>
-        <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
-        <td>{{ lead.normalized_full_name or lead.full_name or "" }}<br>{{ lead.normalized_company_name or lead.company_name or "" }}<br>{{ lead.normalized_title or lead.title or "" }}</td>
-        <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}<br>source={{ lead.anchor_source or "" }}<br>resolution={{ lead.resolution_status or "" }} ({{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }})</td>
-        <td>missing={{ lead.fields_missing_json or "[]" }}<br>suspicious={{ lead.fields_suspicious_json or "[]" }}</td>
-        <td>{{ lead.business_type or "" }}<br>{{ lead.public_company_email or "" }} / {{ lead.public_company_phone or "" }}</td>
-        <td>enrich={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}<br>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score }}</td>
-        <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span><br>{{ lead.enrichment_error or "" }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="resolution-legend">
+    <strong>Resolution status guide:</strong>
+    <span><code>skipped_existing_anchor</code> = row already had a website/domain, so lookup was intentionally skipped.</span>
+    <span><code>resolved</code> = resolver selected a canonical website/domain.</span>
+    <span><code>ambiguous</code> = multiple plausible candidates, no safe winner.</span>
+    <span><code>unresolved</code> = not enough evidence to resolve.</span>
+    <span><code>failed</code> = resolution step encountered an error.</span>
+  </div>
+  <div class="table-wrap">
+    <table class="lead-table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Person/Company</th><th>Anchor + Resolution</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="lead-rows-body">
+        {% for lead in run.leads %}
+        <tr>
+          <td><a href="/leads/{{ lead.id }}">{{ lead.id }}</a></td>
+          <td>{{ lead.normalized_full_name or lead.full_name or "" }}<br>{{ lead.normalized_company_name or lead.company_name or "" }}<br>{{ lead.normalized_title or lead.title or "" }}</td>
+          <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}<br>source={{ lead.anchor_source or "" }}<br>resolution={{ lead.resolution_status or "" }} ({{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }})</td>
+          <td>missing={{ lead.fields_missing_json or "[]" }}<br>suspicious={{ lead.fields_suspicious_json or "[]" }}</td>
+          <td>{{ lead.business_type or "" }}<br>{{ lead.public_company_email or "" }} / {{ lead.public_company_phone or "" }}</td>
+          <td>enrich={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}<br>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score }}</td>
+          <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span><br>{{ lead.enrichment_error or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <script>
