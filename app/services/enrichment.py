@@ -11,12 +11,15 @@ from app.models import EnrichmentRun, Lead, LeadClassification, LeadDebugEvent, 
 from app.services.classify import classify_business
 from app.services.crawl import crawl_site
 from app.services.extract import extract_from_pages
+from app.services.lead_row import analyze_row, canonicalize_row, compute_scores, resolve_anchor, to_json
 from app.services.logging_utils import get_logger
-from app.services.normalize import clean_company_name, dedupe_key, normalize_domain, normalize_phone, normalize_url
-from app.services.score import score_lead
+from app.services.normalize import dedupe_key, normalize_domain, normalize_url
 from app.settings import settings
 
 logger = get_logger(__name__)
+
+
+MINIMAL_CRAWL_PAGE_TYPES = {"homepage", "contact", "about", "team"}
 
 
 def _add_debug_event(
@@ -42,6 +45,30 @@ def _add_debug_event(
     )
 
 
+def _maybe_person_name_found(lead: Lead, pages: list[LeadPage | Any]) -> bool:
+    if not lead.normalized_full_name:
+        return False
+    targets = {lead.normalized_full_name.lower()}
+    if lead.last_name:
+        targets.add(lead.last_name.lower())
+    for page in pages:
+        if page.page_type not in {"team", "about"}:
+            continue
+        text = (page.text if hasattr(page, "text") else page.raw_text) or ""
+        lowered = text.lower()
+        if any(name in lowered for name in targets):
+            return True
+    return False
+
+
+def _build_outreach_angle(lead: Lead) -> str:
+    if lead.business_type and lead.short_summary:
+        return f"Mention {lead.business_type.lower()} focus and reference: {lead.short_summary[:140]}"
+    if lead.company_name:
+        return f"Personalize around {lead.company_name} with a concise problem/solution opener"
+    return "Keep outreach generic due to weak anchors"
+
+
 def process_run(db: Session, run_id: int) -> None:
     run = db.get(EnrichmentRun, run_id)
     if not run:
@@ -50,6 +77,9 @@ def process_run(db: Session, run_id: int) -> None:
     run.status = "processing"
     db.commit()
 
+    diagnostic = run.csv_diagnostic
+    header_mapping = json.loads(diagnostic.header_mapping_json) if diagnostic else {}
+
     seen: set[str] = set()
     leads = db.query(Lead).filter(Lead.run_id == run.id).order_by(Lead.id).all()
 
@@ -57,27 +87,69 @@ def process_run(db: Session, run_id: int) -> None:
         logger.info("lead.processing.started", extra_fields={"run_id": run.id, "lead_id": lead.id})
         try:
             lead.enrichment_status = "processing"
-            lead.cleaned_company_name = clean_company_name(lead.original_company_name)
-            lead.normalized_domain = normalize_domain(lead.original_website)
-            lead.normalized_phone = normalize_phone(lead.original_phone)
-            lead.city = lead.original_city or ""
-            lead.state = lead.original_state or ""
+
+            raw_row = json.loads(lead.original_row_json or "{}")
+            canonical = canonicalize_row(raw_row, header_mapping)
+            analysis = analyze_row(canonical)
+            anchor = resolve_anchor(canonical)
+
+            lead.first_name = canonical.first_name
+            lead.last_name = canonical.last_name
+            lead.full_name = canonical.full_name
+            lead.normalized_full_name = canonical.normalized_full_name
+            lead.title = canonical.title
+            lead.normalized_title = canonical.normalized_title
+            lead.company_name = canonical.company_name
+            lead.normalized_company_name = canonical.normalized_company_name
+            lead.email = canonical.email
+            lead.normalized_email = canonical.normalized_email
+            lead.email_domain = canonical.email_domain
+            lead.phone = canonical.phone
+            lead.normalized_phone = canonical.normalized_phone
+            lead.company_domain = canonical.company_domain
+            lead.website = canonical.website
+            lead.linkedin_url = canonical.linkedin_url
+            lead.city = canonical.city
+            lead.state = canonical.state
+            lead.location_text = canonical.location_text
+
+            lead.cleaned_company_name = canonical.normalized_company_name
+            lead.normalized_domain = canonical.company_domain
+
+            lead.anchor_type = anchor.anchor_type
+            lead.anchor_value = anchor.anchor_value
+            lead.anchor_reason = anchor.reason
+            lead.fields_present_json = to_json(analysis.fields_present)
+            lead.fields_missing_json = to_json(analysis.fields_missing)
+            lead.fields_suspicious_json = to_json(analysis.fields_suspicious)
+            lead.validation_notes = "; ".join(analysis.validation_notes)
+
+            provenance = {k: "original_csv" for k, v in canonical.as_dict().items() if v}
+            if canonical.normalized_full_name:
+                provenance["normalized_full_name"] = "normalized_from_original"
+            if canonical.company_domain and not raw_row.get(header_mapping.get("company_domain", ""), ""):
+                provenance["company_domain"] = "derived_from_website_or_email"
+            if canonical.email_domain:
+                provenance["email_domain"] = "derived_from_email_domain"
+
             _add_debug_event(
                 db,
                 run_id=run.id,
                 lead_id=lead.id,
-                stage="normalize",
+                stage="row_analysis",
                 status="ok",
-                message="Normalized lead values",
+                message="Canonical row normalized and analyzed",
                 payload={
-                    "cleaned_company_name": lead.cleaned_company_name,
-                    "normalized_domain": lead.normalized_domain,
-                    "normalized_phone": lead.normalized_phone,
+                    "canonical": canonical.as_dict(),
+                    "present": analysis.fields_present,
+                    "missing": analysis.fields_missing,
+                    "suspicious": analysis.fields_suspicious,
+                    "anchor": anchor.__dict__,
                 },
             )
             db.commit()
 
-            key = dedupe_key(lead.original_company_name, lead.original_website)
+            key = dedupe_key(lead.company_name, lead.website)
             if key in seen and key != "|":
                 lead.enrichment_status = "completed"
                 lead.enrichment_error = "duplicate_in_run"
@@ -87,151 +159,163 @@ def process_run(db: Session, run_id: int) -> None:
                 continue
             seen.add(key)
 
-            start_url = normalize_url(lead.original_website)
-            if not start_url:
-                lead.enrichment_status = "failed"
-                lead.enrichment_error = "missing_website"
-                run.processed_rows += 1
-                _add_debug_event(db, run_id=run.id, lead_id=lead.id, stage="crawl_homepage", status="failed", message="Missing website")
-                db.commit()
-                continue
+            crawl_url = normalize_url(lead.website or lead.company_domain)
+            should_crawl = bool(crawl_url and anchor.anchor_type != "unresolved")
+            pages: list[Any] = []
+            good_pages: list[Any] = []
 
-            pages = crawl_site(start_url)
-            _add_debug_event(
-                db,
-                run_id=run.id,
-                lead_id=lead.id,
-                stage="discover_subpages",
-                status="ok",
-                message="Crawl completed",
-                payload={"page_urls": [p.url for p in pages], "statuses": [p.fetch_status for p in pages]},
-            )
-            logger.info(
-                "lead.crawl.completed",
-                extra_fields={"lead_id": lead.id, "urls": [p.url for p in pages], "statuses": [p.fetch_status for p in pages]},
-            )
-            for page in pages:
-                html_path = _save_page_html(run.id, lead.id, page.page_type, page.html)
+            if should_crawl:
+                pages = crawl_site(crawl_url)
+                pages = [p for p in pages if p.page_type in MINIMAL_CRAWL_PAGE_TYPES]
+                _add_debug_event(
+                    db,
+                    run_id=run.id,
+                    lead_id=lead.id,
+                    stage="crawl",
+                    status="ok",
+                    message="Minimal crawl attempted",
+                    payload={"page_urls": [p.url for p in pages], "statuses": [p.fetch_status for p in pages]},
+                )
+                for page in pages:
+                    html_path = _save_page_html(run.id, lead.id, page.page_type, page.html)
+                    db.add(
+                        LeadPage(
+                            lead_id=lead.id,
+                            page_type=page.page_type,
+                            url=page.url,
+                            title=page.title,
+                            raw_text=page.text[:25000] if page.text else "",
+                            html_path=str(html_path),
+                            fetched_with=page.fetched_with,
+                            fetch_status=page.fetch_status,
+                        )
+                    )
+                db.commit()
+                good_pages = [p for p in pages if p.fetch_status == "ok"]
+            else:
+                _add_debug_event(
+                    db,
+                    run_id=run.id,
+                    lead_id=lead.id,
+                    stage="crawl",
+                    status="skip",
+                    message="Crawl skipped; weak/no anchor",
+                )
+                db.commit()
+
+            company_site_found = bool(good_pages)
+            person_name_found = _maybe_person_name_found(lead, good_pages)
+
+            if good_pages:
+                extraction = extract_from_pages(good_pages)
                 db.add(
-                    LeadPage(
+                    LeadExtraction(
                         lead_id=lead.id,
-                        page_type=page.page_type,
-                        url=page.url,
-                        title=page.title,
-                        raw_text=page.text[:25000] if page.text else "",
-                        html_path=str(html_path),
-                        fetched_with=page.fetched_with,
-                        fetch_status=page.fetch_status,
+                        emails_json=json.dumps(extraction.emails),
+                        phones_json=json.dumps(extraction.phones),
+                        social_links_json=json.dumps(extraction.social_links),
+                        address_text=extraction.address_text,
+                        contact_page_url=extraction.contact_page_url,
+                        about_page_url=extraction.about_page_url,
+                        team_page_url=extraction.team_page_url,
+                        booking_signals_json=json.dumps(extraction.booking_signals),
+                        financing_signals_json=json.dumps(extraction.financing_signals),
+                        chat_widget_signals_json=json.dumps(extraction.chat_widget_signals),
                     )
                 )
-            db.commit()
+                lead.public_company_email = extraction.emails[0] if extraction.emails else ""
+                lead.public_company_phone = extraction.phones[0] if extraction.phones else ""
+                lead.company_address = extraction.address_text or ""
+                lead.contact_page_url = extraction.contact_page_url or ""
+                lead.about_page_url = extraction.about_page_url or ""
+                lead.team_page_url = extraction.team_page_url or ""
 
-            good_pages = [p for p in pages if p.fetch_status == "ok"]
-            if not good_pages:
-                lead.enrichment_status = "failed"
-                lead.enrichment_error = "no_extractable_data"
-                run.processed_rows += 1
-                _add_debug_event(db, run_id=run.id, lead_id=lead.id, stage="extract_fields", status="failed", message="No extractable pages")
-                db.commit()
-                continue
+                lead.public_email = lead.public_company_email
+                lead.public_phone = lead.public_company_phone
+                lead.address = lead.company_address
 
-            extraction = extract_from_pages(good_pages)
-            db.add(
-                LeadExtraction(
-                    lead_id=lead.id,
-                    emails_json=json.dumps(extraction.emails),
-                    phones_json=json.dumps(extraction.phones),
-                    social_links_json=json.dumps(extraction.social_links),
-                    address_text=extraction.address_text,
-                    contact_page_url=extraction.contact_page_url,
-                    about_page_url=extraction.about_page_url,
-                    team_page_url=extraction.team_page_url,
-                    booking_signals_json=json.dumps(extraction.booking_signals),
-                    financing_signals_json=json.dumps(extraction.financing_signals),
-                    chat_widget_signals_json=json.dumps(extraction.chat_widget_signals),
-                )
-            )
-            lead.public_email = extraction.emails[0] if extraction.emails else ""
-            lead.public_phone = extraction.phones[0] if extraction.phones else ""
-            lead.address = extraction.address_text or ""
-            _add_debug_event(
-                db,
-                run_id=run.id,
-                lead_id=lead.id,
-                stage="extract_fields",
-                status="ok",
-                message="Extracted deterministic signals",
-                payload={"emails": extraction.emails, "phones": extraction.phones, "social_links": extraction.social_links},
-            )
+                social = extraction.social_links
+                lead.facebook_url = social.get("facebook_url", "")
+                lead.instagram_url = social.get("instagram_url", "")
+                lead.linkedin_company_url = social.get("linkedin_url", "")
 
-            full_text = " ".join([p.text for p in good_pages if p.text])[:20000]
-            classification = classify_business(full_text, extraction.has_contact_form)
-            db.add(
-                LeadClassification(
-                    lead_id=lead.id,
-                    model_name=classification.model_name or settings.ollama_model,
-                    prompt_version=classification.prompt_version,
-                    raw_response=classification.raw_response,
-                    business_type=classification.business_type,
-                    services_json=json.dumps(classification.services),
-                    short_summary=classification.short_summary,
-                    likely_decision_maker_names_json=json.dumps(classification.likely_decision_maker_names),
-                    fit_reason=classification.fit_reason,
-                    confidence=classification.confidence,
-                    ollama_request_payload_json=json.dumps(classification.ollama_request_payload),
-                    ollama_raw_response=classification.ollama_raw_response,
-                    ollama_parse_error=classification.ollama_parse_error,
-                )
-            )
-            _add_debug_event(
-                db,
-                run_id=run.id,
-                lead_id=lead.id,
-                stage="classify",
-                status="ok" if not classification.error else "warning",
-                message="Classification completed" if not classification.error else f"LLM fallback: {classification.error}",
-                payload={
-                    "model": classification.model_name,
-                    "business_type": classification.business_type,
-                    "parse_error": classification.ollama_parse_error,
-                },
-            )
+                provenance["public_company_email"] = "website_extraction"
+                provenance["public_company_phone"] = "website_extraction"
+                provenance["company_address"] = "website_extraction"
 
-            lead.business_type = classification.business_type
-            lead.services_json = json.dumps(classification.services)
-            lead.short_summary = classification.short_summary
-            lead.has_online_booking = classification.has_online_booking or bool(extraction.booking_signals)
-            lead.has_contact_form = classification.has_contact_form or extraction.has_contact_form
-            lead.has_chat_widget = classification.has_chat_widget or bool(extraction.chat_widget_signals)
-            lead.mentions_financing = classification.mentions_financing or bool(extraction.financing_signals)
-            lead.likely_decision_maker_names_json = json.dumps(classification.likely_decision_maker_names)
-            lead.fit_reason = classification.fit_reason
+                # only classify when we have enough crawl text
+                combined_text = " ".join([p.text for p in good_pages if p.text])[:6000]
+                if len(combined_text) > 600:
+                    classification = classify_business(combined_text, extraction.has_contact_form)
+                    db.add(
+                        LeadClassification(
+                            lead_id=lead.id,
+                            model_name=classification.model_name or settings.ollama_model,
+                            prompt_version=classification.prompt_version,
+                            raw_response=classification.raw_response,
+                            business_type=classification.business_type,
+                            services_json=json.dumps(classification.services),
+                            short_summary=classification.short_summary,
+                            likely_decision_maker_names_json=json.dumps(classification.likely_decision_maker_names),
+                            fit_reason=classification.fit_reason,
+                            confidence=classification.confidence,
+                            ollama_request_payload_json=json.dumps(classification.ollama_request_payload),
+                            ollama_raw_response=classification.ollama_raw_response,
+                            ollama_parse_error=classification.ollama_parse_error,
+                        )
+                    )
+                    lead.business_type = classification.business_type
+                    lead.services_json = json.dumps(classification.services)
+                    lead.short_summary = classification.short_summary
+                    lead.has_online_booking = classification.has_online_booking or bool(extraction.booking_signals)
+                    lead.has_contact_form = classification.has_contact_form or extraction.has_contact_form
+                    lead.has_chat_widget = classification.has_chat_widget or bool(extraction.chat_widget_signals)
+                    lead.mentions_financing = classification.mentions_financing or bool(extraction.financing_signals)
+                    lead.likely_decision_maker_names_json = json.dumps(classification.likely_decision_maker_names)
+                    lead.fit_reason = classification.fit_reason
+                    provenance["business_type"] = "llm_classification"
+                    provenance["short_summary"] = "llm_classification"
+                else:
+                    lead.has_contact_form = extraction.has_contact_form
+                    lead.has_online_booking = bool(extraction.booking_signals)
+                    lead.has_chat_widget = bool(extraction.chat_widget_signals)
+                    lead.mentions_financing = bool(extraction.financing_signals)
+            else:
+                if lead.validation_notes:
+                    lead.validation_notes += "; "
+                lead.validation_notes = (lead.validation_notes or "") + "Company site unavailable or blocked"
 
-            scored = score_lead(
-                has_email=bool(lead.public_email),
-                has_phone=bool(lead.public_phone),
-                has_address=bool(lead.address),
-                has_summary=bool(lead.short_summary),
-                classification_confidence=classification.confidence,
-                page_count=len(good_pages),
-            )
-            lead.fit_score = scored.fit_score
-            lead.extraction_confidence = scored.extraction_confidence
+            if person_name_found:
+                lead.validation_notes = f"{lead.validation_notes}; person name found on team/about page".strip("; ")
+            elif good_pages and lead.full_name:
+                lead.validation_notes = f"{lead.validation_notes}; company site found but person not found".strip("; ")
+
+            scores = compute_scores(canonical, analysis, person_name_found=person_name_found, company_site_found=company_site_found)
+            lead.company_match_confidence = float(scores["company_match_confidence"])
+            lead.person_match_confidence = float(scores["person_match_confidence"])
+            lead.enrichment_confidence = float(scores["enrichment_confidence"])
+            lead.lead_quality_score = int(scores["lead_quality_score"])
+            lead.fit_score = lead.lead_quality_score
+            lead.extraction_confidence = lead.enrichment_confidence
+            lead.outreach_angle = _build_outreach_angle(lead)
+            lead.provenance_json = json.dumps(provenance)
+
+            if anchor.anchor_type == "unresolved":
+                lead.enrichment_status = "unresolved"
+                lead.enrichment_error = "no_usable_anchor"
+            else:
+                lead.enrichment_status = "completed"
+
+            run.processed_rows += 1
             _add_debug_event(
                 db,
                 run_id=run.id,
                 lead_id=lead.id,
                 stage="score",
                 status="ok",
-                message="Lead scored",
-                payload={"fit_score": lead.fit_score, "extraction_confidence": lead.extraction_confidence},
+                message="Row-centric confidence scoring completed",
+                payload=scores,
             )
-
-            lead.enrichment_status = "completed"
-            if classification.error:
-                lead.enrichment_error = f"llm_fallback: {classification.error}"
-            run.processed_rows += 1
-            _add_debug_event(db, run_id=run.id, lead_id=lead.id, stage="persist", status="ok", message="Lead saved")
             db.commit()
             logger.info("lead.processing.completed", extra_fields={"run_id": run.id, "lead_id": lead.id})
         except Exception as exc:

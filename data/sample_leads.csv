@@ -1,4 +1,6 @@
-company_name,website,city,state,phone,email
-Acme Dental,https://www.acmedental.com,Austin,TX,(512) 555-1212,info@acmedental.com
-Northside Plumbing,https://northsideplumbing.example,Denver,CO,303-555-9012,
-Peak Fitness Studio,peakfitness.example,Seattle,WA,,hello@peakfitness.example
+first_name,last_name,company,title,email,phone,website,linkedin profile,city,state,location
+Maya,Lopez,North Ridge Dental,Office Manager,maya.lopez@northridgedental.com,,northridgedental.com,https://www.linkedin.com/in/maya-lopez-dental/,Austin,TX,
+,Chen,Summit HVAC,,info@summithvac.com,512-555-1100,https://summithvac.com,,Round Rock,TX,
+Jordan,,Blue Harbor Wellness,Founder,jordan@blueharborwellness.com,,blueharborwellness.com,,Seattle,WA,
+Alex,Patel,,VP Operations,alex.patel@everpeak.io,,https://everpeak.io,,San Jose,CA,
+Taylor,Reed,Oakline Roofing,Project Estimator,,,oaklineroofing.com,,Denver,CO,
