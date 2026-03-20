@@ -16,4 +16,5 @@ class LeadUploadRow(BaseModel):
     linkedin_url: str | None = None
     city: str | None = None
     state: str | None = None
+    address: str | None = None
     location: str | None = None

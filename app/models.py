@@ -40,6 +40,7 @@ class Lead(Base):
     original_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
     original_phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
     original_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    original_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -60,10 +61,12 @@ class Lead(Base):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     state: Mapped[str | None] = mapped_column(String(100), nullable=True)
     location_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     anchor_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     anchor_value: Mapped[str | None] = mapped_column(String(500), nullable=True)
     anchor_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    anchor_source: Mapped[str | None] = mapped_column(String(80), nullable=True)
     fields_present_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fields_missing_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fields_suspicious_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -75,6 +78,13 @@ class Lead(Base):
     company_match_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     validation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     outreach_angle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resolved_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resolution_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    resolution_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidate_websites_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # company/site outputs
     public_company_email: Mapped[str | None] = mapped_column(String(255), nullable=True)

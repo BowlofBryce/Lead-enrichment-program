@@ -21,6 +21,7 @@ CANONICAL_COLUMNS = [
     "city",
     "state",
     "location_text",
+    "address",
 ]
 
 CANONICAL_ALIASES: dict[str, list[str]] = {
@@ -37,6 +38,7 @@ CANONICAL_ALIASES: dict[str, list[str]] = {
     "city": ["city"],
     "state": ["state"],
     "location_text": ["location"],
+    "address": ["address", "street", "street_address", "address1"],
 }
 
 GENERIC_EMAIL_PREFIXES = {"info", "hello", "sales", "support", "contact", "admin"}
@@ -63,6 +65,7 @@ class CanonicalLeadRow:
     city: str = ""
     state: str = ""
     location_text: str = ""
+    address: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return self.__dict__.copy()
@@ -151,6 +154,7 @@ def canonicalize_row(raw_row: dict[str, Any], mapping: dict[str, str]) -> Canoni
         city=getv("city"),
         state=getv("state"),
         location_text=getv("location_text"),
+        address=getv("address"),
     )
 
     if row.full_name and (not row.first_name or not row.last_name):
@@ -215,10 +219,10 @@ def resolve_anchor(canonical: CanonicalLeadRow) -> AnchorResolution:
         return AnchorResolution("linkedin_url", canonical.linkedin_url, "LinkedIn URL is strongest person/company anchor")
     if canonical.email_domain:
         return AnchorResolution("email_domain", canonical.email_domain, "Derived from direct email address")
-    if canonical.company_domain:
-        return AnchorResolution("company_domain", canonical.company_domain, "Provided or derived company domain")
     if canonical.website:
         return AnchorResolution("website", canonical.website, "Company website provided")
+    if canonical.company_domain:
+        return AnchorResolution("company_domain", canonical.company_domain, "Provided or derived company domain")
     if canonical.company_name and (canonical.city or canonical.state):
         return AnchorResolution(
             "company_name_location",
@@ -230,7 +234,14 @@ def resolve_anchor(canonical: CanonicalLeadRow) -> AnchorResolution:
     return AnchorResolution("unresolved", "", "No usable anchor fields")
 
 
-def compute_scores(canonical: CanonicalLeadRow, analysis: RowAnalysis, person_name_found: bool, company_site_found: bool) -> dict[str, float | int]:
+def compute_scores(
+    canonical: CanonicalLeadRow,
+    analysis: RowAnalysis,
+    person_name_found: bool,
+    company_site_found: bool,
+    resolution_confidence: float = 0.0,
+    resolution_status: str = "",
+) -> dict[str, float | int]:
     company_conf = 0.2
     person_conf = 0.2
 
@@ -242,6 +253,10 @@ def compute_scores(canonical: CanonicalLeadRow, analysis: RowAnalysis, person_na
         company_conf += 0.15
     if company_site_found:
         company_conf += 0.1
+    if resolution_status == "resolved":
+        company_conf += min(0.22, max(0.0, resolution_confidence) * 0.22)
+    elif resolution_status in {"ambiguous", "unresolved"}:
+        company_conf -= 0.08
 
     if canonical.full_name:
         person_conf += 0.25

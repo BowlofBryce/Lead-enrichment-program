@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, text
@@ -89,6 +90,7 @@ async def upload_csv(
                 original_state=raw.get(mapping.get("state", ""), ""),
                 original_phone=raw.get(mapping.get("phone", ""), ""),
                 original_email=raw.get(mapping.get("email", ""), ""),
+                original_address=raw.get(mapping.get("address", ""), ""),
                 enrichment_status="pending",
             )
         )
@@ -153,6 +155,57 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return templates.TemplateResponse("run_detail.html", {"request": request, "run": run, "debug_mode": settings.debug_mode})
+
+
+@router.get("/api/runs/{run_id}/progress")
+def run_progress_api(run_id: int, db: Session = Depends(get_db)):
+    run = db.get(EnrichmentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    leads = (
+        db.query(Lead)
+        .filter(Lead.run_id == run.id)
+        .order_by(Lead.id.asc())
+        .all()
+    )
+    lead_rows = [
+        {
+            "id": lead.id,
+            "person_company": " | ".join(
+                [
+                    lead.normalized_full_name or lead.full_name or "",
+                    lead.normalized_company_name or lead.company_name or "",
+                    lead.normalized_title or lead.title or "",
+                ]
+            ).strip(" |"),
+            "anchor_type": lead.anchor_type or "",
+            "anchor_value": lead.anchor_value or "",
+            "anchor_source": lead.anchor_source or "",
+            "resolution_status": lead.resolution_status or "",
+            "resolution_confidence": lead.resolution_confidence,
+            "analysis_missing": lead.fields_missing_json or "[]",
+            "analysis_suspicious": lead.fields_suspicious_json or "[]",
+            "business_type": lead.business_type or "",
+            "public_company_email": lead.public_company_email or "",
+            "public_company_phone": lead.public_company_phone or "",
+            "enrichment_confidence": lead.enrichment_confidence,
+            "person_match_confidence": lead.person_match_confidence,
+            "company_match_confidence": lead.company_match_confidence,
+            "lead_quality_score": lead.lead_quality_score,
+            "enrichment_status": lead.enrichment_status,
+            "enrichment_error": lead.enrichment_error or "",
+        }
+        for lead in leads
+    ]
+    return JSONResponse(
+        {
+            "run_id": run.id,
+            "status": run.status,
+            "processed_rows": run.processed_rows,
+            "total_rows": run.total_rows,
+            "leads": lead_rows,
+        }
+    )
 
 
 @router.get("/runs/{run_id}/export")
@@ -327,8 +380,14 @@ def llm_debug_test(
 def health_page(request: Request, db: Session = Depends(get_db)):
     db_status = "ok"
     db_error = ""
+    run_count = 0
+    lead_count = 0
+    event_count = 0
     try:
         db.execute(text("SELECT 1"))
+        run_count = db.query(func.count(EnrichmentRun.id)).scalar() or 0
+        lead_count = db.query(func.count(Lead.id)).scalar() or 0
+        event_count = db.query(func.count(LeadDebugEvent.id)).scalar() or 0
     except Exception as exc:
         db_status = "failed"
         db_error = str(exc)
@@ -337,23 +396,30 @@ def health_page(request: Request, db: Session = Depends(get_db)):
     exports_dir = Path("data/exports")
     pages_dir = Path("data/pages")
 
+    try:
+        ollama_health = check_ollama_health()
+    except Exception as exc:
+        ollama_health = {"reachable": False, "model_available": False, "error": str(exc), "models": []}
+
     return templates.TemplateResponse(
         "debug_health.html",
         {
             "request": request,
+            "app_status": "ok",
             "debug_mode": settings.debug_mode,
             "db_status": db_status,
             "db_error": db_error,
-            "run_count": db.query(func.count(EnrichmentRun.id)).scalar() or 0,
-            "lead_count": db.query(func.count(Lead.id)).scalar() or 0,
-            "event_count": db.query(func.count(LeadDebugEvent.id)).scalar() or 0,
-            "ollama": check_ollama_health(),
+            "run_count": run_count,
+            "lead_count": lead_count,
+            "event_count": event_count,
+            "ollama_health": ollama_health,
+            "ollama_model": settings.ollama_model,
             "uploads_dir": str(uploads_dir.resolve()),
-            "uploads_exists": uploads_dir.exists(),
+            "uploads_ok": uploads_dir.exists(),
             "exports_dir": str(exports_dir.resolve()),
-            "exports_exists": exports_dir.exists(),
+            "exports_ok": exports_dir.exists(),
             "pages_dir": str(pages_dir.resolve()),
-            "pages_exists": pages_dir.exists(),
+            "pages_ok": pages_dir.exists(),
         },
     )
 
