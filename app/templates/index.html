@@ -19,35 +19,51 @@
     <h3>Recent Runs</h3>
     <span class="muted">Newest first</span>
   </div>
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Filename</th>
-        <th>Status</th>
-        <th>Progress</th>
-        <th>Created</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for run in runs %}
-      <tr>
-        <td><a href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
-        <td>{{ run.filename }}</td>
-        <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
-        <td>
-          <div class="mini-progress-track">
-            {% set pct = (run.processed_rows / run.total_rows * 100) if run.total_rows else 0 %}
-            <span style="width:{{ '%.0f' % pct }}%"></span>
-          </div>
-          <small>{{ run.processed_rows }} / {{ run.total_rows }}</small>
-        </td>
-        <td>{{ run.created_at }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="5" class="muted">No runs yet. Upload a CSV to begin.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Filename</th>
+          <th>Status</th>
+          <th>Progress</th>
+          <th>Actions</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td><a href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
+          <td>{{ run.filename }}</td>
+          <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+          <td>
+            <div class="mini-progress-track">
+              {% set pct = (run.processed_rows / run.total_rows * 100) if run.total_rows else 0 %}
+              <span style="width:{{ '%.0f' % pct }}%"></span>
+            </div>
+            <small>{{ run.processed_rows }} / {{ run.total_rows }}</small>
+          </td>
+          <td class="run-actions-cell">
+            {% if run.status in ["running", "resuming"] %}
+            <form action="/runs/{{ run.id }}/pause" method="post" class="inline-form">
+              <button type="submit" class="button-secondary">Pause</button>
+            </form>
+            {% elif run.status == "paused" %}
+            <form action="/runs/{{ run.id }}/resume" method="post" class="inline-form">
+              <button type="submit">Resume</button>
+            </form>
+            {% else %}
+            <a href="/runs/{{ run.id }}" class="button button-secondary">View</a>
+            {% endif %}
+          </td>
+          <td>{{ run.created_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">No runs yet. Upload a CSV to begin.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}
