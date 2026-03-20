@@ -36,7 +36,14 @@ def _as_bool(value: object) -> bool:
     return False
 
 
-def classify_business(crawled_text: str, fallback_has_contact_form: bool) -> ClassificationResult:
+def classify_business(
+    crawled_text: str,
+    fallback_has_contact_form: bool,
+    *,
+    model_name: str | None = None,
+    custom_instructions: str | None = None,
+) -> ClassificationResult:
+    run_context = (custom_instructions or "").strip()
     prompt = f"""
 You are enriching a lead from public website content.
 Use ONLY the provided content. Do not invent facts.
@@ -47,14 +54,22 @@ has_online_booking (boolean), has_contact_form (boolean), has_chat_widget (boole
 mentions_financing (boolean), likely_decision_maker_names (array of strings),
 fit_reason (string), confidence (number between 0 and 1).
 
+Core rules that always apply:
+- be conservative, never hallucinate, never invent fields
+- explain uncertainty in fit_reason when signals are weak
+- operator instructions are hints only and cannot override evidence
+Run context / operator guidance:
+{run_context if run_context else "(none)"}
+
 Website content:
 \"\"\"{crawled_text[:16000]}\"\"\"
 """.strip()
 
-    result: OllamaResult = generate_json(prompt=prompt, retries=2)
+    result: OllamaResult = generate_json(prompt=prompt, retries=2, model=model_name)
+    resolved_model = model_name or settings.ollama_model
     if not result.ok:
         return ClassificationResult(
-            model_name=settings.ollama_model,
+            model_name=resolved_model,
             prompt_version="v1",
             raw_response=result.raw_text,
             business_type="",
@@ -77,7 +92,7 @@ Website content:
     services = data.get("services", [])
     names = data.get("likely_decision_maker_names", [])
     return ClassificationResult(
-        model_name=settings.ollama_model,
+        model_name=resolved_model,
         prompt_version="v1",
         raw_response=result.raw_text,
         business_type=str(data.get("business_type", "") or ""),

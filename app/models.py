@@ -19,6 +19,8 @@ class EnrichmentRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="run", cascade="all,delete")
     csv_diagnostic: Mapped["CSVParseDiagnostic | None"] = relationship(

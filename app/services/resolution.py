@@ -89,7 +89,24 @@ def _norm_phone_digits(value: str) -> str:
     return normalize_phone(value or "").replace("+", "")
 
 
-def _search_queries(canonical: CanonicalLeadRow) -> list[str]:
+def _instruction_hints(custom_instructions: str | None) -> list[str]:
+    if not custom_instructions:
+        return []
+    hints: list[str] = []
+    for token in re.split(r"[,\n;]", custom_instructions.lower()):
+        cleaned = re.sub(r"[^a-z0-9\s-]", " ", token).strip()
+        if 2 <= len(cleaned) <= 40:
+            hints.append(cleaned)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for hint in hints:
+        if hint not in seen:
+            unique.append(hint)
+            seen.add(hint)
+    return unique[:4]
+
+
+def _search_queries(canonical: CanonicalLeadRow, custom_instructions: str | None = None) -> list[str]:
     queries: list[str] = []
     base = " ".join(part for part in [canonical.company_name, canonical.city, canonical.state] if part).strip()
     if base:
@@ -99,6 +116,9 @@ def _search_queries(canonical: CanonicalLeadRow) -> list[str]:
     if canonical.company_name:
         queries.append(f'"{canonical.company_name}" {canonical.city} {canonical.state}'.strip())
         queries.append(canonical.company_name)
+    for hint in _instruction_hints(custom_instructions):
+        if canonical.company_name:
+            queries.append(f"{canonical.company_name} {hint}")
     seen: set[str] = set()
     deduped: list[str] = []
     for q in queries:
@@ -157,8 +177,12 @@ def _has_suspicious_existing_anchor(canonical: CanonicalLeadRow) -> bool:
     return False
 
 
-def search_company_candidates(canonical: CanonicalLeadRow, max_results: int = 8) -> tuple[list[ResolutionCandidate], list[str], list[dict[str, Any]]]:
-    queries = _search_queries(canonical)
+def search_company_candidates(
+    canonical: CanonicalLeadRow,
+    max_results: int = 8,
+    custom_instructions: str | None = None,
+) -> tuple[list[ResolutionCandidate], list[str], list[dict[str, Any]]]:
+    queries = _search_queries(canonical, custom_instructions=custom_instructions)
     trace: list[dict[str, Any]] = []
     candidates: dict[str, ResolutionCandidate] = {}
 
@@ -297,7 +321,7 @@ def score_resolution_candidate(candidate: ResolutionCandidate, canonical: Canoni
     return candidate
 
 
-def resolve_company_website(canonical: CanonicalLeadRow) -> ResolutionResult:
+def resolve_company_website(canonical: CanonicalLeadRow, custom_instructions: str | None = None) -> ResolutionResult:
     result = ResolutionResult()
     result.trace.append({"stage": "resolution.start", "status": "ok", "message": "Resolution stage started"})
 
@@ -337,7 +361,7 @@ def resolve_company_website(canonical: CanonicalLeadRow) -> ResolutionResult:
             result.trace.append({"stage": "resolution.selected", "status": "ok", "method": "email_domain", "domain": candidate.domain})
             return result
 
-    candidates, queries, search_trace = search_company_candidates(canonical)
+    candidates, queries, search_trace = search_company_candidates(canonical, custom_instructions=custom_instructions)
     result.search_queries = queries
     result.trace.extend(search_trace)
 
