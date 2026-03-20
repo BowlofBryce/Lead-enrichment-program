@@ -5,11 +5,40 @@
   <p><strong>File:</strong> {{ run.filename }}</p>
   <p><strong>Status:</strong> <span id="run-status" class="status status-{{ run.status }}">{{ run.status }}</span></p>
   <p><strong>Progress:</strong> <span id="run-progress">{{ run.processed_rows }} / {{ run.total_rows }}</span></p>
+  {% if run.error_message %}
+    <p><strong>Error:</strong> {{ run.error_message }}</p>
+  {% endif %}
   {% if run.status == "pending" %}
     <a href="/runs/{{ run.id }}/preview" class="button">Review CSV Preview</a>
-    <form action="/runs/{{ run.id }}/start" method="post"><button type="submit">Start Run</button></form>
+    <form action="/runs/{{ run.id }}/start" method="post">
+      {% if not ollama_reachable %}
+        <p><strong>Ollama status:</strong> <span class="status status-failed">Unavailable</span> — {{ ollama_models_error }}</p>
+      {% endif %}
+      <label for="selected_model"><strong>Model for this run</strong></label>
+      <select id="selected_model" name="selected_model">
+        <option value="">Use default ({{ default_model }})</option>
+        {% for model in installed_models %}
+          <option value="{{ model.name }}" {% if run.selected_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="custom_instructions"><strong>Run-level custom instructions</strong></label>
+      <textarea id="custom_instructions" name="custom_instructions" rows="5" placeholder="Optional guidance for resolution/classification.">{{ run.custom_instructions or "" }}</textarea>
+      <button type="submit">Start Run</button>
+    </form>
   {% endif %}
   <a href="/runs/{{ run.id }}/export" class="button">Export Enriched CSV</a>
+</section>
+
+<section class="card">
+  <h3>Run Config</h3>
+  <p><strong>Model used:</strong> {{ resolved_model }}</p>
+  <p><strong>Model source:</strong> {{ "default fallback (.env/settings)" if used_default_model else "run-selected model" }}</p>
+  {% if not used_default_model %}
+    <p><strong>Configured default model:</strong> {{ default_model }}</p>
+  {% endif %}
+  <p><strong>Custom instructions:</strong></p>
+  <pre>{{ run.custom_instructions or "(none)" }}</pre>
 </section>
 
 <section class="card">

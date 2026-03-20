@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -16,13 +17,27 @@ from app.models import CSVParseDiagnostic, EnrichmentRun, Lead, LeadDebugEvent
 from app.services.csv_utils import EXPECTED_COLUMNS, export_leads_to_csv, inspect_upload_csv, lead_to_export_row
 from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
-from app.services.ollama_client import check_ollama_health, generate
+from app.services.ollama_client import check_ollama_health, create_model_preset, generate, list_models, pull_model
 from app.settings import settings
 
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 logger = get_logger(__name__)
+
+
+def _load_models_state() -> dict[str, object]:
+    try:
+        models = list_models()
+        return {
+            "models": models,
+            "model_names": [m.name for m in models],
+            "error": "",
+            "reachable": True,
+        }
+    except Exception as exc:
+        logger.warning("ollama.models.list.failed", extra_fields={"error": str(exc)})
+        return {"models": [], "model_names": [], "error": str(exc), "reachable": False}
 
 
 def _run_in_background(run_id: int) -> None:
@@ -109,6 +124,7 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
     if not run or not diagnostic:
         raise HTTPException(status_code=404, detail="Run not found")
     mapping = _json_obj(diagnostic.header_mapping_json)
+    models_state = _load_models_state()
     return templates.TemplateResponse(
         "csv_preview.html",
         {
@@ -123,18 +139,44 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
             "warnings": _json_list(diagnostic.warnings_json),
             "found_columns": [c for c in EXPECTED_COLUMNS if mapping.get(c)],
             "missing_columns": [c for c in EXPECTED_COLUMNS if not mapping.get(c)],
+            "installed_models": models_state["models"],
+            "ollama_models_error": models_state["error"],
+            "ollama_reachable": models_state["reachable"],
+            "default_model": settings.ollama_model,
             "debug_mode": settings.debug_mode,
         },
     )
 
 
 @router.post("/runs/{run_id}/start")
-def start_run(run_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def start_run(
+    run_id: int,
+    background_tasks: BackgroundTasks,
+    selected_model: str = Form(default=""),
+    custom_instructions: str = Form(default=""),
+    db: Session = Depends(get_db),
+):
     run = db.get(EnrichmentRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     if run.status in {"processing", "completed"}:
         return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    selected_model = selected_model.strip()
+    custom_instructions = custom_instructions.strip()
+    if selected_model:
+        model_state = _load_models_state()
+        model_names = set(model_state["model_names"])
+        if model_names and selected_model not in model_names:
+            run.status = "failed"
+            run.error_message = f"Selected model '{selected_model}' is not installed."
+            run.selected_model = selected_model
+            run.custom_instructions = custom_instructions
+            db.commit()
+            return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
+    run.selected_model = selected_model or None
+    run.custom_instructions = custom_instructions or None
+    run.error_message = None
+    db.commit()
     logger.info("enrichment.run.enqueue", extra_fields={"run_id": run.id})
     background_tasks.add_task(_run_in_background, run.id)
     return RedirectResponse(url=f"/runs/{run.id}", status_code=303)
@@ -154,7 +196,23 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
     )
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return templates.TemplateResponse("run_detail.html", {"request": request, "run": run, "debug_mode": settings.debug_mode})
+    used_default_model = not bool((run.selected_model or "").strip())
+    resolved_model = run.selected_model or settings.ollama_model
+    models_state = _load_models_state()
+    return templates.TemplateResponse(
+        "run_detail.html",
+        {
+            "request": request,
+            "run": run,
+            "debug_mode": settings.debug_mode,
+            "resolved_model": resolved_model,
+            "used_default_model": used_default_model,
+            "default_model": settings.ollama_model,
+            "installed_models": models_state["models"],
+            "ollama_reachable": models_state["reachable"],
+            "ollama_models_error": models_state["error"],
+        },
+    )
 
 
 @router.get("/api/runs/{run_id}/progress")
@@ -303,6 +361,64 @@ def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
             "provenance": _json_obj(lead.provenance_json),
         },
     )
+
+
+@router.get("/models")
+def models_page(request: Request):
+    models_state = _load_models_state()
+    flash_message = request.query_params.get("message", "")
+    flash_error = request.query_params.get("error", "")
+    return templates.TemplateResponse(
+        "models.html",
+        {
+            "request": request,
+            "installed_models": models_state["models"],
+            "ollama_models_error": models_state["error"],
+            "ollama_reachable": models_state["reachable"],
+            "default_model": settings.ollama_model,
+            "flash_message": flash_message,
+            "flash_error": flash_error,
+            "debug_mode": settings.debug_mode,
+        },
+    )
+
+
+@router.post("/models/pull")
+def pull_model_route(model_name: str = Form(...)):
+    name = model_name.strip()
+    if not name:
+        return RedirectResponse(url="/models?error=Model+name+is+required", status_code=303)
+    try:
+        pull_model(name)
+        logger.info("ollama.model.pull.success", extra_fields={"model_name": name})
+        return RedirectResponse(url=f"/models?message={quote_plus(f'Pull completed for {name}')}", status_code=303)
+    except Exception as exc:
+        logger.exception("ollama.model.pull.failed", extra_fields={"model_name": name})
+        return RedirectResponse(url=f"/models?error={quote_plus(f'Pull failed for {name}: {exc}')}", status_code=303)
+
+
+@router.post("/models/create-preset")
+def create_preset_route(
+    base_model: str = Form(...),
+    preset_name: str = Form(...),
+    system_prompt: str = Form(default=""),
+):
+    base_model = base_model.strip()
+    preset_name = preset_name.strip()
+    system_prompt = system_prompt.strip()
+    if not base_model or not preset_name or not system_prompt:
+        return RedirectResponse(url="/models?error=Base+model%2C+preset+name%2C+and+system+prompt+are+required", status_code=303)
+    model_state = _load_models_state()
+    model_names = set(model_state["model_names"])
+    if model_names and base_model not in model_names:
+        return RedirectResponse(url=f"/models?error={quote_plus(f'Base model not installed: {base_model}')}", status_code=303)
+    try:
+        create_model_preset(base_model=base_model, preset_name=preset_name, system_prompt=system_prompt)
+        logger.info("ollama.model.create_preset.success", extra_fields={"base_model": base_model, "preset_name": preset_name})
+        return RedirectResponse(url=f"/models?message={quote_plus(f'Preset created: {preset_name}')}", status_code=303)
+    except Exception as exc:
+        logger.exception("ollama.model.create_preset.failed", extra_fields={"base_model": base_model, "preset_name": preset_name})
+        return RedirectResponse(url=f"/models?error={quote_plus(f'Create preset failed: {exc}')}", status_code=303)
 
 
 @router.get("/debug/llm")
