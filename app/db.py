@@ -77,6 +77,9 @@ def run_sqlite_migrations() -> None:
             "resolution_confidence": "FLOAT",
             "resolution_notes": "TEXT",
             "candidate_websites_json": "TEXT",
+            "generated_queries_json": "TEXT",
+            "query_generation_notes": "TEXT",
+            "semantic_row_json": "TEXT",
             "resolution_status": "VARCHAR(50)",
             "original_address": "VARCHAR(255)",
             "public_company_email": "VARCHAR(255)",
@@ -93,7 +96,11 @@ def run_sqlite_migrations() -> None:
         "lead_debug_events": {},
         "enrichment_runs": {
             "selected_model": "VARCHAR(120)",
+            "schema_inference_model": "VARCHAR(120)",
+            "query_generation_model": "VARCHAR(120)",
             "custom_instructions": "TEXT",
+            "schema_inference_json": "TEXT",
+            "search_strategy_json": "TEXT",
         },
     }
     with engine.begin() as conn:

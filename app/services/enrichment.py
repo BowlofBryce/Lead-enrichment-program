@@ -11,11 +11,12 @@ from app.models import EnrichmentRun, Lead, LeadClassification, LeadDebugEvent, 
 from app.services.classify import classify_business
 from app.services.crawl import crawl_site
 from app.services.extract import extract_from_pages
-from app.services.lead_row import analyze_row, canonicalize_row, compute_scores, resolve_anchor, to_json
+from app.services.lead_row import analyze_row, canonicalize_from_dynamic, canonicalize_row, compute_scores, resolve_anchor, to_json
 from app.services.logging_utils import get_logger
 from app.services.normalize import dedupe_key, normalize_domain, normalize_url
 from app.services.ollama_client import list_models
 from app.services.resolution import resolve_company_website
+from app.services.schema_inference import infer_schema_plan, transform_row_with_plan
 from app.settings import settings
 
 logger = get_logger(__name__)
@@ -110,6 +111,25 @@ def process_run(db: Session, run_id: int) -> None:
 
     diagnostic = run.csv_diagnostic
     header_mapping = json.loads(diagnostic.header_mapping_json) if diagnostic else {}
+    original_headers = json.loads(diagnostic.original_headers_json) if diagnostic and diagnostic.original_headers_json else []
+    normalized_headers = json.loads(diagnostic.normalized_headers_json) if diagnostic and diagnostic.normalized_headers_json else []
+    preview_rows = json.loads(diagnostic.preview_rows_json) if diagnostic and diagnostic.preview_rows_json else []
+
+    schema_model = (run.schema_inference_model or settings.default_schema_inference_model or model_to_use).strip()
+    query_model = (run.query_generation_model or settings.default_query_generation_model or model_to_use).strip()
+    schema_result = infer_schema_plan(
+        headers=original_headers,
+        normalized_headers=normalized_headers,
+        sample_rows=preview_rows[:50],
+        custom_instructions=custom_instructions,
+        model_name=schema_model,
+    )
+    search_strategy = schema_result.plan_json.get("search_strategy_json", {})
+    run.schema_inference_model = schema_result.model_used
+    run.query_generation_model = query_model
+    run.schema_inference_json = json.dumps(schema_result.plan_json)
+    run.search_strategy_json = json.dumps(search_strategy)
+    db.commit()
 
     seen: set[str] = set()
     leads = db.query(Lead).filter(Lead.run_id == run.id).order_by(Lead.id).all()
@@ -120,9 +140,20 @@ def process_run(db: Session, run_id: int) -> None:
             lead.enrichment_status = "processing"
 
             raw_row = json.loads(lead.original_row_json or "{}")
-            canonical = canonicalize_row(raw_row, header_mapping)
+            transformed = transform_row_with_plan(raw_row, schema_result.plan_json)
+            dynamic_canonical = transformed.get("canonical", {}) if isinstance(transformed, dict) else {}
+            semantic_values = transformed.get("semantic_values", {}) if isinstance(transformed, dict) else {}
+            if isinstance(dynamic_canonical, dict) and any(dynamic_canonical.values()):
+                canonical = canonicalize_from_dynamic(dynamic_canonical)
+            else:
+                canonical = canonicalize_row(raw_row, header_mapping)
             analysis = analyze_row(canonical)
-            resolution = resolve_company_website(canonical, custom_instructions=custom_instructions)
+            resolution = resolve_company_website(
+                canonical,
+                custom_instructions=custom_instructions,
+                search_strategy=search_strategy,
+                query_generation_model=query_model,
+            )
 
             for event in resolution.trace:
                 _add_debug_event(
@@ -176,11 +207,14 @@ def process_run(db: Session, run_id: int) -> None:
             lead.resolution_confidence = resolution.resolution_confidence
             lead.resolution_notes = resolution.resolution_notes
             lead.candidate_websites_json = resolution.candidate_websites_json
+            lead.generated_queries_json = to_json(resolution.search_queries)
+            lead.query_generation_notes = resolution.resolution_notes or ""
             lead.resolution_status = resolution.resolution_status
             lead.fields_present_json = to_json(analysis.fields_present)
             lead.fields_missing_json = to_json(analysis.fields_missing)
             lead.fields_suspicious_json = to_json(analysis.fields_suspicious)
             lead.validation_notes = "; ".join(analysis.validation_notes)
+            lead.semantic_row_json = to_json(semantic_values if isinstance(semantic_values, dict) else {})
 
             provenance = {k: "original_csv" for k, v in canonical.as_dict().items() if v}
             if canonical.normalized_full_name:

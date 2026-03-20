@@ -8,14 +8,28 @@
     <p><strong>Ollama status:</strong> <span class="status status-failed">Unavailable</span> — {{ ollama_models_error }}</p>
   {% endif %}
   <form action="/runs/{{ run.id }}/start" method="post">
-    <label for="selected_model"><strong>Model for this run</strong></label>
+    <label for="selected_model"><strong>Main enrichment model</strong></label>
     <select id="selected_model" name="selected_model">
-      <option value="">Use default ({{ default_model }})</option>
+      <option value="">Use default ({{ default_enrichment_model }})</option>
       {% for model in installed_models %}
         <option value="{{ model.name }}" {% if run.selected_model == model.name %}selected{% endif %}>{{ model.name }}</option>
       {% endfor %}
     </select>
-    <p class="small">Day-to-day model selection happens here. .env remains default fallback only.</p>
+    <label for="schema_inference_model"><strong>Schema inference model (strong, once per run)</strong></label>
+    <select id="schema_inference_model" name="schema_inference_model">
+      <option value="">Use default ({{ default_schema_inference_model }})</option>
+      {% for model in installed_models %}
+        <option value="{{ model.name }}" {% if run.schema_inference_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+      {% endfor %}
+    </select>
+    <label for="query_generation_model"><strong>Query generation model (lightweight)</strong></label>
+    <select id="query_generation_model" name="query_generation_model">
+      <option value="">Use default ({{ default_query_generation_model }})</option>
+      {% for model in installed_models %}
+        <option value="{{ model.name }}" {% if run.query_generation_model == model.name %}selected{% endif %}>{{ model.name }}</option>
+      {% endfor %}
+    </select>
+    <p class="small">The strong model runs once for schema intelligence; query generation can use a smaller model per unresolved row.</p>
 
     <label for="custom_instructions"><strong>Run-level custom instructions</strong></label>
     <textarea id="custom_instructions" name="custom_instructions" rows="6" placeholder="Optional guidance for resolution/classification.">{{ run.custom_instructions or "" }}</textarea>
