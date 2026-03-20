@@ -13,9 +13,16 @@ class EnrichmentRun(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False)
     total_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     processed_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    pause_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    current_action_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -27,6 +34,7 @@ class EnrichmentRun(Base):
     search_strategy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="run", cascade="all,delete")
+    events: Mapped[list["EnrichmentRunEvent"]] = relationship(back_populates="run", cascade="all,delete")
     csv_diagnostic: Mapped["CSVParseDiagnostic | None"] = relationship(
         back_populates="run", uselist=False, cascade="all,delete"
     )
@@ -231,3 +239,19 @@ class LeadDebugEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     lead: Mapped[Lead] = relationship(back_populates="debug_events")
+
+
+class EnrichmentRunEvent(Base):
+    __tablename__ = "enrichment_run_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("enrichment_runs.id"), index=True, nullable=False)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"), index=True, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    machine_status: Mapped[str] = mapped_column(String(50), nullable=False)
+    human_message: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), default="info", nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    run: Mapped[EnrichmentRun] = relationship(back_populates="events")

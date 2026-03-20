@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.models import EnrichmentRun, Lead, LeadClassification, LeadDebugEvent, LeadExtraction, LeadPage
+from app.models import EnrichmentRun, EnrichmentRunEvent, Lead, LeadClassification, LeadDebugEvent, LeadExtraction, LeadPage
 from app.services.classify import classify_business
 from app.services.crawl import crawl_site
 from app.services.extract import extract_from_pages
@@ -43,6 +43,32 @@ def _add_debug_event(
             stage=stage,
             status=status,
             message=message,
+            payload_json=payload_json,
+        )
+    )
+
+
+def _emit_run_event(
+    db: Session,
+    *,
+    run: EnrichmentRun,
+    event_type: str,
+    machine_status: str,
+    human_message: str,
+    severity: str = "info",
+    lead_id: int | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    run.current_action_message = human_message
+    payload_json = json.dumps(payload) if payload else None
+    db.add(
+        EnrichmentRunEvent(
+            run_id=run.id,
+            lead_id=lead_id,
+            event_type=event_type,
+            machine_status=machine_status,
+            human_message=human_message,
+            severity=severity,
             payload_json=payload_json,
         )
     )
@@ -106,7 +132,20 @@ def process_run(db: Session, run_id: int) -> None:
             "custom_instructions": custom_instructions[:400],
         },
     )
-    run.status = "processing"
+    if run.status in {"completed", "cancelled"}:
+        return
+    run.status = "running" if run.processed_rows == 0 else "resuming"
+    if not run.started_at:
+        run.started_at = datetime.utcnow()
+    if run.processed_rows > 0:
+        run.resumed_at = datetime.utcnow()
+    _emit_run_event(
+        db,
+        run=run,
+        event_type="run_state",
+        machine_status=run.status,
+        human_message="Starting enrichment run." if run.status == "running" else "Resuming enrichment from saved progress.",
+    )
     db.commit()
 
     diagnostic = run.csv_diagnostic
@@ -129,15 +168,49 @@ def process_run(db: Session, run_id: int) -> None:
     run.query_generation_model = query_model
     run.schema_inference_json = json.dumps(schema_result.plan_json)
     run.search_strategy_json = json.dumps(search_strategy)
+    _emit_run_event(
+        db,
+        run=run,
+        event_type="schema",
+        machine_status=run.status,
+        human_message="Reading uploaded CSV and mapping columns.",
+    )
     db.commit()
 
     seen: set[str] = set()
-    leads = db.query(Lead).filter(Lead.run_id == run.id).order_by(Lead.id).all()
+    leads = (
+        db.query(Lead)
+        .filter(Lead.run_id == run.id)
+        .filter(Lead.enrichment_status.in_(["pending", "processing"]))
+        .order_by(Lead.id)
+        .all()
+    )
 
     for lead in leads:
+        db.refresh(run)
+        if run.pause_requested:
+            run.status = "paused"
+            _emit_run_event(
+                db,
+                run=run,
+                event_type="run_state",
+                machine_status="paused",
+                human_message="Paused. Waiting for resume.",
+            )
+            db.commit()
+            return
         logger.info("lead.processing.started", extra_fields={"run_id": run.id, "lead_id": lead.id})
         try:
             lead.enrichment_status = "processing"
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="lead_start",
+                machine_status=run.status,
+                human_message=f"Calling enrichment provider for record {run.processed_rows + 1} of {run.total_rows}.",
+            )
+            db.commit()
 
             raw_row = json.loads(lead.original_row_json or "{}")
             transformed = transform_row_with_plan(raw_row, schema_result.plan_json)
@@ -148,6 +221,14 @@ def process_run(db: Session, run_id: int) -> None:
             else:
                 canonical = canonicalize_row(raw_row, header_mapping)
             analysis = analyze_row(canonical)
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="normalize",
+                machine_status=run.status,
+                human_message="Normalizing company website URLs and contact fields.",
+            )
             resolution = resolve_company_website(
                 canonical,
                 custom_instructions=custom_instructions,
@@ -253,7 +334,17 @@ def process_run(db: Session, run_id: int) -> None:
                 lead.enrichment_status = "completed"
                 lead.enrichment_error = "duplicate_in_run"
                 run.processed_rows += 1
+                run.skipped_count += 1
                 _add_debug_event(db, run_id=run.id, lead_id=lead.id, stage="persist", status="skip", message="Duplicate in run")
+                _emit_run_event(
+                    db,
+                    run=run,
+                    lead_id=lead.id,
+                    event_type="lead_skip",
+                    machine_status=run.status,
+                    human_message="Skipping duplicate record already seen in this run.",
+                    severity="warning",
+                )
                 db.commit()
                 continue
             seen.add(key)
@@ -264,6 +355,14 @@ def process_run(db: Session, run_id: int) -> None:
             good_pages: list[Any] = []
 
             if should_crawl:
+                _emit_run_event(
+                    db,
+                    run=run,
+                    lead_id=lead.id,
+                    event_type="crawl",
+                    machine_status=run.status,
+                    human_message=f"Checking company domain for contact data ({crawl_url}).",
+                )
                 pages = crawl_site(crawl_url)
                 pages = [p for p in pages if p.page_type in MINIMAL_CRAWL_PAGE_TYPES]
                 _add_debug_event(
@@ -345,6 +444,14 @@ def process_run(db: Session, run_id: int) -> None:
                 # only classify when we have enough crawl text
                 combined_text = " ".join([p.text for p in good_pages if p.text])[:6000]
                 if len(combined_text) > 600:
+                    _emit_run_event(
+                        db,
+                        run=run,
+                        lead_id=lead.id,
+                        event_type="classify",
+                        machine_status=run.status,
+                        human_message="Classifying business type and summarizing services from website content.",
+                    )
                     classification = classify_business(
                         combined_text,
                         extraction.has_contact_form,
@@ -417,8 +524,10 @@ def process_run(db: Session, run_id: int) -> None:
             if anchor.anchor_type == "unresolved":
                 lead.enrichment_status = "unresolved"
                 lead.enrichment_error = "no_usable_anchor"
+                run.skipped_count += 1
             else:
                 lead.enrichment_status = "completed"
+                run.success_count += 1
 
             run.processed_rows += 1
             _add_debug_event(
@@ -431,17 +540,47 @@ def process_run(db: Session, run_id: int) -> None:
                 payload=scores,
             )
             db.commit()
+            db.refresh(run)
+            if run.pause_requested:
+                run.status = "paused"
+                _emit_run_event(
+                    db,
+                    run=run,
+                    event_type="run_state",
+                    machine_status="paused",
+                    human_message="Paused. Waiting for resume.",
+                )
+                db.commit()
+                return
             logger.info("lead.processing.completed", extra_fields={"run_id": run.id, "lead_id": lead.id})
         except Exception as exc:
             lead.enrichment_status = "failed"
             lead.enrichment_error = str(exc)
             run.processed_rows += 1
+            run.failed_count += 1
             _add_debug_event(db, run_id=run.id, lead_id=lead.id, stage="persist", status="failed", message=str(exc))
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="lead_failed",
+                machine_status=run.status,
+                human_message=f"Record {lead.id} failed: {exc}",
+                severity="error",
+            )
             db.commit()
             logger.exception("lead.processing.failed", extra_fields={"run_id": run.id, "lead_id": lead.id})
 
     run.status = "completed" if run.processed_rows >= run.total_rows else "failed"
     run.completed_at = datetime.utcnow()
+    _emit_run_event(
+        db,
+        run=run,
+        event_type="run_state",
+        machine_status=run.status,
+        human_message="Run complete. Finalizing export." if run.status == "completed" else "Run ended early due to errors.",
+        severity="error" if run.status == "failed" else "info",
+    )
     db.commit()
     logger.info("enrichment.run.completed", extra_fields={"run_id": run.id, "status": run.status})
 

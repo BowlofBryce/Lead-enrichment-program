@@ -1,16 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <h2>Upload CSV</h2>
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept=".csv" required>
-    <button type="submit">Upload & Preview Parse</button>
+<section class="hero card">
+  <div>
+    <p class="eyebrow">Lead Enrichment</p>
+    <h2>Upload, enrich, and monitor runs in real time</h2>
+    <p class="muted">Start with a CSV, then track every enrichment stage from queue to export.</p>
+  </div>
+  <form action="/upload" method="post" enctype="multipart/form-data" class="upload-panel">
+    <label for="upload-file"><strong>CSV file</strong></label>
+    <input id="upload-file" type="file" name="file" accept=".csv" required>
+    <button type="submit">Upload & Review</button>
+    <p class="small">You can validate header mapping and model settings before the run starts.</p>
   </form>
-  <p class="muted">After upload, you will confirm parsed headers/rows before enrichment starts.</p>
 </section>
 
 <section class="card">
-  <h2>Recent Runs</h2>
+  <div class="section-head">
+    <h3>Recent Runs</h3>
+    <span class="muted">Newest first</span>
+  </div>
   <table>
     <thead>
       <tr>
@@ -24,14 +32,20 @@
     <tbody>
       {% for run in runs %}
       <tr>
-        <td><a href="/runs/{{ run.id }}">{{ run.id }}</a></td>
+        <td><a href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
         <td>{{ run.filename }}</td>
         <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
-        <td>{{ run.processed_rows }} / {{ run.total_rows }}</td>
+        <td>
+          <div class="mini-progress-track">
+            {% set pct = (run.processed_rows / run.total_rows * 100) if run.total_rows else 0 %}
+            <span style="width:{{ '%.0f' % pct }}%"></span>
+          </div>
+          <small>{{ run.processed_rows }} / {{ run.total_rows }}</small>
+        </td>
         <td>{{ run.created_at }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="5">No runs yet.</td></tr>
+      <tr><td colspan="5" class="muted">No runs yet. Upload a CSV to begin.</td></tr>
       {% endfor %}
     </tbody>
   </table>
