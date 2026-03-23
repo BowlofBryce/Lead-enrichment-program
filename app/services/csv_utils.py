@@ -14,6 +14,15 @@ from app.services.lead_row import CANONICAL_COLUMNS, analyze_row, canonicalize_r
 EXPECTED_COLUMNS = CANONICAL_COLUMNS
 
 EXPORT_COLUMNS = [
+    "company_name",
+    "website",
+    "decision_maker_name",
+    "decision_maker_role",
+    "decision_maker_email",
+    "decision_maker_phone",
+    "general_phone",
+    "confidence_score",
+    "source",
     "original_row_json",
     "canonical_first_name",
     "canonical_last_name",
@@ -130,7 +139,25 @@ def read_upload_csv(path: Path) -> pd.DataFrame:
 
 
 def lead_to_export_row(lead: Lead) -> dict[str, Any]:
+    structured = {}
+    try:
+        structured = json.loads(lead.semantic_row_json or "{}")
+    except Exception:
+        structured = {}
+    structured = structured if isinstance(structured, dict) else {}
     return {
+        "company_name": structured.get("company_name", lead.normalized_company_name or lead.company_name or ""),
+        "website": structured.get("website", lead.website or ""),
+        "decision_maker_name": structured.get("decision_maker_name", lead.normalized_full_name or lead.full_name or ""),
+        "decision_maker_role": structured.get("decision_maker_role", lead.normalized_title or lead.title or ""),
+        "decision_maker_email": structured.get("decision_maker_email", lead.normalized_email or lead.email or ""),
+        "decision_maker_phone": structured.get("decision_maker_phone", lead.normalized_phone or lead.phone or ""),
+        "general_phone": structured.get("general_phone", lead.public_company_phone or ""),
+        "confidence_score": structured.get(
+            "confidence_score",
+            lead.enrichment_confidence if lead.enrichment_confidence is not None else "",
+        ),
+        "source": structured.get("source", ""),
         "original_row_json": lead.original_row_json or "",
         "canonical_first_name": lead.first_name or "",
         "canonical_last_name": lead.last_name or "",

@@ -318,6 +318,11 @@ def run_progress_api(run_id: int, db: Session = Depends(get_db)):
             "business_type": lead.business_type or "",
             "public_company_email": lead.public_company_email or "",
             "public_company_phone": lead.public_company_phone or "",
+            "decision_maker_name": lead.normalized_full_name or lead.full_name or "",
+            "decision_maker_role": lead.normalized_title or lead.title or "",
+            "decision_maker_email": lead.normalized_email or lead.email or "",
+            "decision_maker_phone": lead.normalized_phone or lead.phone or "",
+            "confidence_score": lead.enrichment_confidence,
             "enrichment_confidence": lead.enrichment_confidence,
             "person_match_confidence": lead.person_match_confidence,
             "company_match_confidence": lead.company_match_confidence,
@@ -621,6 +626,42 @@ def llm_debug_test(
     )
 
 
+@router.get("/debug/enrichment")
+def enrichment_debug_page(
+    request: Request,
+    run_id: int | None = None,
+    lead_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Lead).options(joinedload(Lead.extraction), joinedload(Lead.debug_events))
+    if lead_id:
+        query = query.filter(Lead.id == lead_id)
+    elif run_id:
+        query = query.filter(Lead.run_id == run_id).order_by(Lead.id.desc())
+    else:
+        query = query.order_by(Lead.id.desc())
+    lead = query.first()
+    payload: dict[str, object] = {}
+    if lead:
+        extraction = lead.extraction
+        payload = {
+            "lead_id": lead.id,
+            "run_id": lead.run_id,
+            "extracted_raw_contacts": {
+                "emails": _json_list(extraction.emails_json) if extraction else [],
+                "phones": _json_list(extraction.phones_json) if extraction else [],
+            },
+            "phone_classifications": _debug_events_payload(lead.debug_events, "contact_extraction"),
+            "llm_input": _debug_events_payload(lead.debug_events, "decision_engine", "llm_input"),
+            "llm_output": _debug_events_payload(lead.debug_events, "decision_engine", "llm_output"),
+            "final_scored_result": _json_obj(lead.semantic_row_json),
+        }
+    return templates.TemplateResponse(
+        "debug_enrichment.html",
+        {"request": request, "lead": lead, "payload": payload, "run_id": run_id or "", "lead_id": lead_id or ""},
+    )
+
+
 @router.get("/debug/health")
 def health_page(request: Request, db: Session = Depends(get_db)):
     db_status = "ok"
@@ -687,3 +728,13 @@ def _json_obj(value: str | None) -> dict:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _debug_events_payload(events: list[LeadDebugEvent], stage: str, key: str | None = None) -> object:
+    matches = [event for event in events if event.stage == stage]
+    if not matches:
+        return {}
+    payload = _json_obj(matches[-1].payload_json)
+    if key and isinstance(payload, dict):
+        return payload.get(key, {})
+    return payload

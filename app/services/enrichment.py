@@ -4,14 +4,15 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
-from app.models import EnrichmentRun, EnrichmentRunEvent, Lead, LeadClassification, LeadDebugEvent, LeadExtraction, LeadPage
-from app.services.classify import classify_business
+from enrichment.contact_extractor import ContactExtractionResult, extract_contacts
+from enrichment.decision_engine import build_lead_output, run_decision_engine
+from app.models import EnrichmentRun, EnrichmentRunEvent, Lead, LeadDebugEvent, LeadExtraction, LeadPage
 from app.services.crawl import crawl_site
-from app.services.extract import extract_from_pages
-from app.services.lead_row import analyze_row, canonicalize_from_dynamic, canonicalize_row, compute_scores, resolve_anchor, to_json
+from app.services.lead_row import analyze_row, canonicalize_from_dynamic, canonicalize_row, resolve_anchor, to_json
 from app.services.logging_utils import get_logger
 from app.services.normalize import dedupe_key, normalize_domain, normalize_url
 from app.services.ollama_client import list_models
@@ -98,6 +99,11 @@ def _build_outreach_angle(lead: Lead) -> str:
     return "Keep outreach generic due to weak anchors"
 
 
+def _cache_key_for_url(url: str) -> str:
+    parsed = urlparse(url)
+    return parsed.netloc.lower().strip() or url.lower().strip()
+
+
 def process_run(db: Session, run_id: int) -> None:
     run = db.get(EnrichmentRun, run_id)
     if not run:
@@ -178,6 +184,7 @@ def process_run(db: Session, run_id: int) -> None:
     db.commit()
 
     seen: set[str] = set()
+    domain_page_cache: dict[str, list[Any]] = {}
     leads = (
         db.query(Lead)
         .filter(Lead.run_id == run.id)
@@ -353,6 +360,7 @@ def process_run(db: Session, run_id: int) -> None:
             should_crawl = bool(crawl_url and anchor.anchor_type != "unresolved")
             pages: list[Any] = []
             good_pages: list[Any] = []
+            contact_result = ContactExtractionResult(items=[])
 
             if should_crawl:
                 _emit_run_event(
@@ -361,10 +369,15 @@ def process_run(db: Session, run_id: int) -> None:
                     lead_id=lead.id,
                     event_type="crawl",
                     machine_status=run.status,
-                    human_message=f"Checking company domain for contact data ({crawl_url}).",
+                    human_message=f"🌐 Scraping website ({crawl_url}).",
                 )
-                pages = crawl_site(crawl_url)
-                pages = [p for p in pages if p.page_type in MINIMAL_CRAWL_PAGE_TYPES]
+                domain_key = _cache_key_for_url(crawl_url)
+                if domain_key in domain_page_cache:
+                    pages = domain_page_cache[domain_key]
+                else:
+                    pages = crawl_site(crawl_url)
+                    pages = [p for p in pages if p.page_type in MINIMAL_CRAWL_PAGE_TYPES][:4]
+                    domain_page_cache[domain_key] = pages
                 _add_debug_event(
                     db,
                     run_id=run.id,
@@ -402,119 +415,143 @@ def process_run(db: Session, run_id: int) -> None:
                 db.commit()
 
             company_site_found = bool(good_pages)
-            person_name_found = _maybe_person_name_found(lead, good_pages)
+            person_name_found = False
 
             if good_pages:
-                extraction = extract_from_pages(good_pages)
+                _emit_run_event(
+                    db,
+                    run=run,
+                    lead_id=lead.id,
+                    event_type="extract_contacts",
+                    machine_status=run.status,
+                    human_message="📄 Extracting contacts.",
+                )
+                contact_result = extract_contacts(good_pages)
+                emails = [item.value for item in contact_result.emails]
+                phones = [item.value for item in contact_result.phones]
+                person_name_found = bool(contact_result.names)
                 db.add(
                     LeadExtraction(
                         lead_id=lead.id,
-                        emails_json=json.dumps(extraction.emails),
-                        phones_json=json.dumps(extraction.phones),
-                        social_links_json=json.dumps(extraction.social_links),
-                        address_text=extraction.address_text,
-                        contact_page_url=extraction.contact_page_url,
-                        about_page_url=extraction.about_page_url,
-                        team_page_url=extraction.team_page_url,
-                        booking_signals_json=json.dumps(extraction.booking_signals),
-                        financing_signals_json=json.dumps(extraction.financing_signals),
-                        chat_widget_signals_json=json.dumps(extraction.chat_widget_signals),
+                        emails_json=json.dumps(emails),
+                        phones_json=json.dumps(phones),
+                        social_links_json=json.dumps({}),
+                        address_text="",
+                        contact_page_url=next((p.url for p in good_pages if p.page_type == "contact"), ""),
+                        about_page_url=next((p.url for p in good_pages if p.page_type == "about"), ""),
+                        team_page_url=next((p.url for p in good_pages if p.page_type == "team"), ""),
+                        booking_signals_json=json.dumps([]),
+                        financing_signals_json=json.dumps([]),
+                        chat_widget_signals_json=json.dumps([]),
                     )
                 )
-                lead.public_company_email = extraction.emails[0] if extraction.emails else ""
-                lead.public_company_phone = extraction.phones[0] if extraction.phones else ""
-                lead.company_address = extraction.address_text or ""
-                lead.contact_page_url = extraction.contact_page_url or ""
-                lead.about_page_url = extraction.about_page_url or ""
-                lead.team_page_url = extraction.team_page_url or ""
+                lead.public_company_email = emails[0] if emails else ""
+                lead.public_company_phone = phones[0] if phones else ""
+                lead.company_address = ""
+                lead.contact_page_url = next((p.url for p in good_pages if p.page_type == "contact"), "")
+                lead.about_page_url = next((p.url for p in good_pages if p.page_type == "about"), "")
+                lead.team_page_url = next((p.url for p in good_pages if p.page_type == "team"), "")
 
                 lead.public_email = lead.public_company_email
                 lead.public_phone = lead.public_company_phone
                 lead.address = lead.company_address
 
-                social = extraction.social_links
-                lead.facebook_url = social.get("facebook_url", "")
-                lead.instagram_url = social.get("instagram_url", "")
-                lead.linkedin_company_url = social.get("linkedin_url", "")
+                lead.facebook_url = ""
+                lead.instagram_url = ""
+                lead.linkedin_company_url = ""
 
                 provenance["public_company_email"] = "website_extraction"
                 provenance["public_company_phone"] = "website_extraction"
-                provenance["company_address"] = "website_extraction"
-
-                # only classify when we have enough crawl text
-                combined_text = " ".join([p.text for p in good_pages if p.text])[:6000]
-                if len(combined_text) > 600:
-                    _emit_run_event(
-                        db,
-                        run=run,
-                        lead_id=lead.id,
-                        event_type="classify",
-                        machine_status=run.status,
-                        human_message="Classifying business type and summarizing services from website content.",
-                    )
-                    classification = classify_business(
-                        combined_text,
-                        extraction.has_contact_form,
-                        model_name=model_to_use,
-                        custom_instructions=custom_instructions,
-                    )
-                    db.add(
-                        LeadClassification(
-                            lead_id=lead.id,
-                            model_name=classification.model_name or settings.ollama_model,
-                            prompt_version=classification.prompt_version,
-                            raw_response=classification.raw_response,
-                            business_type=classification.business_type,
-                            services_json=json.dumps(classification.services),
-                            short_summary=classification.short_summary,
-                            likely_decision_maker_names_json=json.dumps(classification.likely_decision_maker_names),
-                            fit_reason=classification.fit_reason,
-                            confidence=classification.confidence,
-                            ollama_request_payload_json=json.dumps(classification.ollama_request_payload),
-                            ollama_raw_response=classification.ollama_raw_response,
-                            ollama_parse_error=classification.ollama_parse_error,
-                        )
-                    )
-                    lead.business_type = classification.business_type
-                    lead.services_json = json.dumps(classification.services)
-                    lead.short_summary = classification.short_summary
-                    lead.has_online_booking = classification.has_online_booking or bool(extraction.booking_signals)
-                    lead.has_contact_form = classification.has_contact_form or extraction.has_contact_form
-                    lead.has_chat_widget = classification.has_chat_widget or bool(extraction.chat_widget_signals)
-                    lead.mentions_financing = classification.mentions_financing or bool(extraction.financing_signals)
-                    lead.likely_decision_maker_names_json = json.dumps(classification.likely_decision_maker_names)
-                    lead.fit_reason = classification.fit_reason
-                    provenance["business_type"] = "llm_classification"
-                    provenance["short_summary"] = "llm_classification"
-                else:
-                    lead.has_contact_form = extraction.has_contact_form
-                    lead.has_online_booking = bool(extraction.booking_signals)
-                    lead.has_chat_widget = bool(extraction.chat_widget_signals)
-                    lead.mentions_financing = bool(extraction.financing_signals)
+                _add_debug_event(
+                    db,
+                    run_id=run.id,
+                    lead_id=lead.id,
+                    stage="contact_extraction",
+                    status="ok",
+                    message="Deterministic contact extraction completed",
+                    payload={
+                        **contact_result.to_dict(),
+                        "phone_classifications": [
+                            {
+                                "value": item.value,
+                                "source_page": item.source_page,
+                                "weight": {"team": 0.9, "about": 0.7, "contact": 0.5, "homepage": 0.4}.get(item.source_page, 0.2),
+                            }
+                            for item in contact_result.phones
+                        ],
+                    },
+                )
             else:
                 if lead.validation_notes:
                     lead.validation_notes += "; "
                 lead.validation_notes = (lead.validation_notes or "") + "Company site unavailable or blocked"
+
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="decision_maker",
+                machine_status=run.status,
+                human_message="🧠 Identifying decision maker.",
+            )
+            decision_output = run_decision_engine(contact_result, model_name=model_to_use)
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="phone_match",
+                machine_status=run.status,
+                human_message="📞 Matching phone.",
+            )
+            scored_output = build_lead_output(
+                company_name=lead.company_name or "",
+                website=lead.website or "",
+                decision_output=decision_output,
+                general_phone=lead.public_company_phone or lead.phone or "",
+            )
+            lead.full_name = scored_output["decision_maker_name"] or lead.full_name
+            lead.normalized_full_name = scored_output["decision_maker_name"] or lead.normalized_full_name
+            lead.title = scored_output["decision_maker_role"] or lead.title
+            lead.normalized_title = scored_output["decision_maker_role"] or lead.normalized_title
+            lead.email = scored_output["decision_maker_email"] or lead.email
+            lead.normalized_email = scored_output["decision_maker_email"] or lead.normalized_email
+            lead.phone = scored_output["decision_maker_phone"] or lead.phone
+            lead.normalized_phone = scored_output["decision_maker_phone"] or lead.normalized_phone
+            lead.person_match_confidence = float(scored_output["confidence_score"])
+            lead.company_match_confidence = float(scored_output["confidence_score"])
+            lead.enrichment_confidence = float(scored_output["confidence_score"])
+            lead.extraction_confidence = lead.enrichment_confidence
+            lead.lead_quality_score = int(float(scored_output["confidence_score"]) * 100)
+            lead.fit_score = lead.lead_quality_score
+            lead.semantic_row_json = json.dumps(scored_output)
+            lead.likely_decision_maker_names_json = json.dumps(
+                [scored_output["decision_maker_name"]] if scored_output["decision_maker_name"] else []
+            )
+            lead.validation_notes = (
+                f"{lead.validation_notes}; source={scored_output['source']}"
+                if lead.validation_notes
+                else f"source={scored_output['source']}"
+            )
+
+            _add_debug_event(
+                db,
+                run_id=run.id,
+                lead_id=lead.id,
+                stage="decision_engine",
+                status="ok",
+                message="Decision maker selection completed",
+                payload={
+                    "llm_input": decision_output.llm_input,
+                    "llm_output": decision_output.llm_output,
+                    "result": scored_output,
+                },
+            )
 
             if person_name_found:
                 lead.validation_notes = f"{lead.validation_notes}; person name found on team/about page".strip("; ")
             elif good_pages and lead.full_name:
                 lead.validation_notes = f"{lead.validation_notes}; company site found but person not found".strip("; ")
 
-            scores = compute_scores(
-                canonical,
-                analysis,
-                person_name_found=person_name_found,
-                company_site_found=company_site_found,
-                resolution_confidence=resolution.resolution_confidence,
-                resolution_status=resolution.resolution_status,
-            )
-            lead.company_match_confidence = float(scores["company_match_confidence"])
-            lead.person_match_confidence = float(scores["person_match_confidence"])
-            lead.enrichment_confidence = float(scores["enrichment_confidence"])
-            lead.lead_quality_score = int(scores["lead_quality_score"])
-            lead.fit_score = lead.lead_quality_score
-            lead.extraction_confidence = lead.enrichment_confidence
             lead.outreach_angle = _build_outreach_angle(lead)
             if resolution.resolution_status == "resolved":
                 provenance["resolved_website"] = "resolution_search_or_email"
@@ -530,14 +567,22 @@ def process_run(db: Session, run_id: int) -> None:
                 run.success_count += 1
 
             run.processed_rows += 1
+            _emit_run_event(
+                db,
+                run=run,
+                lead_id=lead.id,
+                event_type="score",
+                machine_status=run.status,
+                human_message="✅ Scoring lead.",
+            )
             _add_debug_event(
                 db,
                 run_id=run.id,
                 lead_id=lead.id,
                 stage="score",
                 status="ok",
-                message="Row-centric confidence scoring completed",
-                payload=scores,
+                message="Decision-maker confidence scoring completed",
+                payload={"confidence_score": scored_output["confidence_score"], "output": scored_output},
             )
             db.commit()
             db.refresh(run)
