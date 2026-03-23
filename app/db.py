@@ -116,6 +116,7 @@ def run_sqlite_migrations() -> None:
             "current_action_message": "TEXT",
             "started_at": "DATETIME",
             "resumed_at": "DATETIME",
+            "discovery_run_id": "INTEGER",
         },
     }
     with engine.begin() as conn:

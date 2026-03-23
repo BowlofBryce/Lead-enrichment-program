@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="run-header">
+    <div>
+      <h2>Discovery Run #{{ run.id }}</h2>
+      <p class="muted">Categories: {{ run.categories_json }} | Locations: {{ run.locations_json }}</p>
+    </div>
+    <div class="run-header-controls">
+      <span id="run-status" class="status status-{{ run.status }}">{{ run.status }}</span>
+      {% if run.status in ["running", "resuming", "queued"] %}
+      <form action="/discovery/runs/{{ run.id }}/pause" method="post" class="inline-form"><button class="button-secondary" type="submit">Pause</button></form>
+      {% endif %}
+      {% if run.status == "paused" %}
+      <form action="/discovery/runs/{{ run.id }}/resume" method="post" class="inline-form"><button type="submit">Resume</button></form>
+      {% endif %}
+      <a href="/discovery" class="button button-secondary">Back</a>
+    </div>
+  </div>
+</section>
+
+<section class="card live-card">
+  <h3>Live Discovery Monitor</h3>
+  <div class="live-grid">
+    <div class="live-primary">
+      <p class="label">What the system is doing right now</p>
+      <div id="current-action" class="current-action">{{ run.current_action_message or "Waiting to start." }}</div>
+      <div class="progress-row">
+        <div class="progress-track"><span id="progress-bar" style="width:0%"></span></div>
+        <div id="run-progress" class="progress-meta">{{ run.processed_queries }} / {{ run.total_queries }}</div>
+      </div>
+      <div class="metrics-grid">
+        <div><span class="metric-label">Raw</span><strong id="metric-raw">0</strong></div>
+        <div><span class="metric-label">Deduped</span><strong id="metric-deduped">0</strong></div>
+        <div><span class="metric-label">Valid</span><strong id="metric-valid">0</strong></div>
+        <div><span class="metric-label">Filtered</span><strong id="metric-filtered">0</strong></div>
+        <div><span class="metric-label">Queued</span><strong id="metric-queued">0</strong></div>
+        <div><span class="metric-label">Rate</span><strong id="metric-rate">0/s</strong></div>
+        <div><span class="metric-label">ETA</span><strong id="metric-eta">—</strong></div>
+        <div><span class="metric-label">Enrichment Run</span><strong id="metric-enrichment">—</strong></div>
+      </div>
+      <p class="small">Leads per source: <span id="source-breakdown">—</span></p>
+    </div>
+    <div>
+      <p class="label">Activity stream</p>
+      <ul id="activity-feed" class="event-log"></ul>
+      <p class="label">Errors & retries</p>
+      <ul id="error-feed" class="event-log"></ul>
+    </div>
+  </div>
+</section>
+
+<script>
+const runId = {{ run.id }};
+const actionEl = document.getElementById("current-action");
+const statusEl = document.getElementById("run-status");
+const progressEl = document.getElementById("run-progress");
+const progressBarEl = document.getElementById("progress-bar");
+const activityFeedEl = document.getElementById("activity-feed");
+const errorFeedEl = document.getElementById("error-feed");
+
+function secondsToEta(seconds) {
+  if (seconds === null || seconds === undefined) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}m ${secs}s`;
+}
+
+function eventHtml(evt) {
+  return `<li class="event-${evt.severity}"><span>${evt.human_message}</span><small>${new Date(evt.timestamp).toLocaleTimeString()}</small></li>`;
+}
+
+async function refreshDiscovery() {
+  try {
+    const resp = await fetch(`/api/discovery/runs/${runId}/live`, {cache: "no-store"});
+    if (!resp.ok) return;
+    const data = await resp.json();
+    statusEl.textContent = data.status;
+    statusEl.className = `status status-${data.status}`;
+    actionEl.textContent = data.current_action;
+    progressEl.textContent = `${data.processed_queries} / ${data.total_queries}`;
+    const percent = data.total_queries > 0 ? Math.round((data.processed_queries / data.total_queries) * 100) : 0;
+    progressBarEl.style.width = `${percent}%`;
+
+    document.getElementById("metric-raw").textContent = data.total_raw_leads;
+    document.getElementById("metric-deduped").textContent = data.deduplicated_count;
+    document.getElementById("metric-valid").textContent = data.valid_count;
+    document.getElementById("metric-filtered").textContent = data.filtered_count;
+    document.getElementById("metric-queued").textContent = data.enrichment_queued_count;
+    document.getElementById("metric-rate").textContent = `${data.processing_rate_per_sec}/s`;
+    document.getElementById("metric-eta").textContent = secondsToEta(data.eta_seconds);
+    document.getElementById("metric-enrichment").textContent = data.enrichment_run_id || "—";
+    document.getElementById("source-breakdown").textContent = Object.entries(data.leads_per_source).map(([k,v]) => `${k}: ${v}`).join(" | ") || "—";
+
+    activityFeedEl.innerHTML = data.recent_events.map(eventHtml).join("");
+    const errors = data.recent_events.filter((evt) => evt.severity === "warning" || evt.severity === "error");
+    errorFeedEl.innerHTML = errors.length ? errors.map(eventHtml).join("") : "<li class='muted'>No warnings or errors.</li>";
+
+    if (["running", "resuming", "queued", "paused"].includes(data.status)) {
+      setTimeout(refreshDiscovery, 2000);
+    }
+  } catch (err) {
+    setTimeout(refreshDiscovery, 3500);
+  }
+}
+refreshDiscovery();
+</script>
+{% endblock %}

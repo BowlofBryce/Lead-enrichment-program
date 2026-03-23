@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero card">
+  <div>
+    <p class="eyebrow">Lead Discovery</p>
+    <h2>Discover net-new leads across multiple sources</h2>
+    <p class="muted">Generate location-specific queries, fetch from APIs, dedupe, validate, and handoff directly to enrichment.</p>
+  </div>
+  <form action="/discovery/start" method="post" class="upload-panel">
+    <label><strong>Business categories (comma-separated)</strong></label>
+    <input type="text" name="categories" value="MedSpa, Remodelers, Window Installers" required>
+    <label><strong>States (comma-separated)</strong></label>
+    <input type="text" name="locations" value="UT,ID,NV,AZ,CO,WY">
+    <label><strong>Max retries per failed request</strong></label>
+    <input type="number" min="0" max="5" name="max_retries" value="2">
+    <label class="checkbox-line"><input type="checkbox" name="use_llm" checked> Enable LLM query expansion</label>
+    <button type="submit">Start discovery run</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <h3>Recent discovery runs</h3>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>Status</th><th>Queries</th><th>Valid Leads</th><th>Enrichment</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td><a href="/discovery/runs/{{ run.id }}">#{{ run.id }}</a></td>
+          <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+          <td>{{ run.processed_queries }} / {{ run.total_queries }}</td>
+          <td>{{ run.valid_count }}</td>
+          <td>{% if run.enrichment_run_id %}<a href="/runs/{{ run.enrichment_run_id }}">Run #{{ run.enrichment_run_id }}</a>{% else %}—{% endif %}</td>
+          <td>{{ run.created_at }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">No discovery runs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

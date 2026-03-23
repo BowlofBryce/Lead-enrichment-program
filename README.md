@@ -2,6 +2,34 @@
 
 Local-first FastAPI + Jinja2 + SQLite lead row enrichment for Apollo-like CSV exports. No paid APIs, no cloud dependencies.
 
+## Lead Discovery module (new)
+
+The app now includes a full **Lead Discovery** pipeline at `/discovery` with production-focused stages:
+1. Query generation (deterministic + optional local LLM expansion)
+2. Multi-source fetching (Google Places API, Yelp Fusion API, OpenStreetMap/Nominatim)
+3. Parsing/extraction into common fields
+4. Normalization (phone/url/city/state casing)
+5. Deduplication (website/phone exact + fuzzy name/city)
+6. Validation/quality filtering
+7. Direct enrichment handoff (auto-queues an `EnrichmentRun` with run linkage)
+
+Live UI includes:
+- start/pause/resume controls,
+- real-time counters (raw, deduped, valid, filtered, queued),
+- human-readable “what is happening now” panel sourced from backend events,
+- timestamped activity/error stream.
+
+### Lead Discovery environment variables
+
+Set these in `.env` for discovery sources:
+- `GOOGLE_PLACES_API_KEY`
+- `YELP_API_KEY`
+- `DISCOVERY_ENABLE_OSM=true` (default true)
+- `DISCOVERY_OSM_USER_AGENT=lead-enrichment-local/1.0`
+- `DISCOVERY_GOOGLE_MIN_INTERVAL_SECONDS=0.25`
+- `DISCOVERY_YELP_MIN_INTERVAL_SECONDS=0.3`
+- `DISCOVERY_OSM_MIN_INTERVAL_SECONDS=1.1`
+
 ## New local model controls (no day-to-day `.env` edits)
 
 You can now control model behavior from the UI per enrichment run:
