@@ -26,6 +26,26 @@ logger = get_logger(__name__)
 MINIMAL_CRAWL_PAGE_TYPES = {"homepage", "contact", "about", "team"}
 
 
+def extract_from_pages(pages: list[Any]) -> ContactExtractionResult:
+    """Backward-compatible wrapper used by older tests/callers."""
+    return extract_contacts(pages)
+
+
+def compute_scores(
+    *,
+    confidence_score: float,
+) -> dict[str, float | int]:
+    """Backward-compatible score shape derived from confidence score."""
+    score = max(0.0, min(1.0, float(confidence_score)))
+    quality = int(score * 100)
+    return {
+        "company_match_confidence": score,
+        "person_match_confidence": score,
+        "enrichment_confidence": score,
+        "lead_quality_score": quality,
+    }
+
+
 def _add_debug_event(
     db: Session,
     *,
