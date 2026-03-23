@@ -20,7 +20,9 @@ templates = Jinja2Templates(directory="app/templates")
 def _run_discovery_bg(run_id: int) -> None:
     db = SessionLocal()
     try:
-        process_discovery_run(db, run_id)
+        run = db.get(DiscoveryRun, run_id)
+        auto_start = bool(run.full_pipeline_mode) if run else False
+        process_discovery_run(db, run_id, auto_start_enrichment=auto_start)
     finally:
         db.close()
 
@@ -37,6 +39,7 @@ def discovery_start(
     categories: str = Form(...),
     locations: str = Form(default="UT,ID,NV,AZ,CO,WY"),
     use_llm: bool = Form(default=True),
+    full_pipeline_mode: bool = Form(default=False),
     max_retries: int = Form(default=2),
     query_model: str = Form(default=""),
     db: Session = Depends(get_db),
@@ -50,6 +53,7 @@ def discovery_start(
         categories_json=json.dumps(category_list),
         locations_json=json.dumps(location_list),
         use_llm_query_expansion=use_llm,
+        full_pipeline_mode=full_pipeline_mode,
         max_retries=max(0, min(5, max_retries)),
         query_model=query_model.strip() or None,
     )
@@ -153,6 +157,7 @@ def discovery_live(run_id: int, db: Session = Depends(get_db)):
             "processing_rate_per_sec": round(rate, 2),
             "eta_seconds": eta,
             "enrichment_run_id": run.enrichment_run_id,
+            "full_pipeline_mode": run.full_pipeline_mode,
             "recent_events": [
                 {
                     "id": evt.id,

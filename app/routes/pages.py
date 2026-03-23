@@ -498,6 +498,48 @@ def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/leads/completed")
+def completed_leads_page(request: Request, db: Session = Depends(get_db)):
+    leads = (
+        db.query(Lead)
+        .options(joinedload(Lead.run))
+        .filter(Lead.enrichment_status == "completed")
+        .order_by(Lead.updated_at.desc(), Lead.id.desc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        "completed_leads.html",
+        {
+            "request": request,
+            "leads": leads,
+            "completed_count": len(leads),
+            "debug_mode": settings.debug_mode,
+        },
+    )
+
+
+@router.get("/leads/completed/export")
+def export_completed_leads(db: Session = Depends(get_db)):
+    leads = (
+        db.query(Lead)
+        .options(joinedload(Lead.extraction))
+        .filter(Lead.enrichment_status == "completed")
+        .order_by(Lead.updated_at.desc(), Lead.id.desc())
+        .all()
+    )
+    rows = []
+    for lead in leads:
+        row = lead_to_export_row(lead)
+        original = _json_obj(lead.original_row_json)
+        row.update(original)
+        row["run_id"] = lead.run_id
+        row["lead_id"] = lead.id
+        rows.append(row)
+    output_path = Path("data/exports") / "completed_leads_export.csv"
+    export_leads_to_csv(rows, output_path)
+    return FileResponse(path=output_path, filename=output_path.name, media_type="text/csv")
+
+
 @router.get("/models")
 def models_page(request: Request):
     models_state = _load_models_state()

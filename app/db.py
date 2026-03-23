@@ -106,6 +106,9 @@ def run_sqlite_migrations() -> None:
             "norm_phone": "VARCHAR(32)",
             "norm_domain": "VARCHAR(255)",
         },
+        "discovery_runs": {
+            "full_pipeline_mode": "BOOLEAN DEFAULT 0",
+        },
         "enrichment_runs": {
             "selected_model": "VARCHAR(120)",
             "schema_inference_model": "VARCHAR(120)",

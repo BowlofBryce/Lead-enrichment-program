@@ -4,7 +4,7 @@
   <div class="run-header">
     <div>
       <h2>Discovery Run #{{ run.id }}</h2>
-      <p class="muted">Categories: {{ run.categories_json }} | Locations: {{ run.locations_json }}</p>
+      <p class="muted">Categories: {{ run.categories_json }} | Locations: {{ run.locations_json }} | Mode: {% if run.full_pipeline_mode %}Full pipeline{% else %}Discovery only{% endif %}</p>
     </div>
     <div class="run-header-controls">
       <span id="run-status" class="status status-{{ run.status }}">{{ run.status }}</span>
