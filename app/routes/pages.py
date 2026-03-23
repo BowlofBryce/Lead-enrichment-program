@@ -430,7 +430,7 @@ def export_run(run_id: int, db: Session = Depends(get_db)):
     return FileResponse(path=output_path, filename=output_path.name, media_type="text/csv")
 
 
-@router.get("/leads/{lead_id}")
+@router.get("/leads/{lead_id:int}")
 def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
     lead = (
         db.query(Lead)
