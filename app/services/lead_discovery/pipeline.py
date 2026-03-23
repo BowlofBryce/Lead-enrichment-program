@@ -4,6 +4,7 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import requests
 from sqlalchemy.orm import Session
 
 from app.models import CSVParseDiagnostic, DiscoveryEvent, DiscoveryLead, DiscoveryRun, EnrichmentRun, Lead
@@ -15,7 +16,7 @@ from app.services.lead_discovery.parsing import (
     parse_raw_business,
     to_normalized,
 )
-from app.services.lead_discovery.query_generator import generate_discovery_queries
+from app.services.lead_discovery.query_generator import generate_discovery_queries_with_stats
 from app.services.lead_discovery.sources import SourceAdapter, build_enabled_sources, merge_order_index
 from app.services.lead_discovery.types import DiscoveryQuery, NormalizedLead
 from app.services.lead_discovery.validation import validate_lead
@@ -45,12 +46,14 @@ def _retry_fetch(source: SourceAdapter, query: DiscoveryQuery, retries: int):
     for attempt in range(retries + 1):
         try:
             return source.fetch(query)
-        except Exception as exc:
+        except requests.RequestException as exc:
             last_exc = exc
             if attempt >= retries:
                 raise
             delay = settings.discovery_retry_backoff_seconds * (attempt + 1)
             time.sleep(delay)
+        except Exception:
+            raise
     raise last_exc  # pragma: no cover
 
 
@@ -98,8 +101,40 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
         event_type="stage",
         message=f"Generating structured queries for categories {categories} across locations {locations}",
     )
-    queries = generate_discovery_queries(categories, locations, use_llm=run.use_llm_query_expansion, model_name=run.query_model)
+    queries, query_stats = generate_discovery_queries_with_stats(
+        categories,
+        locations,
+        use_llm=run.use_llm_query_expansion,
+        model_name=run.query_model,
+    )
     run.total_queries = len(queries)
+    logger.info(
+        "lead_discovery_queries_planned",
+        extra={
+            "run_id": run.id,
+            "total_queries_planned": query_stats.total_structured_planned,
+            "queries_skipped_exact_dedupe": query_stats.skipped_exact_dedupe,
+            "queries_skipped_semantic_dedupe": query_stats.skipped_semantic_dedupe,
+            "final_queries": query_stats.total_final,
+        },
+    )
+    _emit(
+        db,
+        run,
+        stage="query_generation",
+        event_type="query_metrics",
+        message=(
+            f"Planned {query_stats.total_structured_planned} queries; skipped "
+            f"{query_stats.skipped_exact_dedupe + query_stats.skipped_semantic_dedupe} duplicates; "
+            f"executing {query_stats.total_final}"
+        ),
+        payload={
+            "planned_total": query_stats.total_structured_planned,
+            "skipped_exact_dedupe": query_stats.skipped_exact_dedupe,
+            "skipped_semantic_dedupe": query_stats.skipped_semantic_dedupe,
+            "final_total": query_stats.total_final,
+        },
+    )
     db.commit()
 
     sources = build_enabled_sources()
@@ -144,6 +179,20 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
         db.commit()
 
         source_results, source_errors = _fetch_sources_parallel(sources, query, run.max_retries)
+        provider_status: dict[str, dict[str, object]] = {}
+        for src in sources:
+            provider_status[src.name] = {
+                "disabled": bool(getattr(src, "disabled_for_run", False)),
+                "success_results_before_block": int(getattr(src, "total_success_results", 0)),
+            }
+        _emit(
+            db,
+            run,
+            stage="source_fetching",
+            event_type="provider_status",
+            message=f"Current provider status: {provider_status}",
+            payload={"providers": provider_status},
+        )
         for sname, err in source_errors.items():
             _emit(
                 db,

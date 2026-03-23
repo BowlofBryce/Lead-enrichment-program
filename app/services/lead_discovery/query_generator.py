@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from itertools import product
+from dataclasses import dataclass
 from typing import Iterable
 
 from app.services.lead_discovery.types import DiscoveryQuery
@@ -35,6 +36,16 @@ CATEGORY_SYNONYMS: dict[str, list[str]] = {
     "exotic car rental": ["exotic car rental", "luxury car rental", "supercar rental"],
 }
 
+HIGH_VOLUME_MEDSPA_VARIANTS = {"med spa", "medical spa", "aesthetic clinic", "botox", "laser spa"}
+
+
+@dataclass(slots=True)
+class QueryGenerationStats:
+    total_structured_planned: int = 0
+    total_final: int = 0
+    skipped_exact_dedupe: int = 0
+    skipped_semantic_dedupe: int = 0
+
 
 def _normalize_state(state: str) -> str:
     token = (state or "").strip().upper()
@@ -60,6 +71,8 @@ def _keyword_variants_for_category(category: str) -> list[str]:
     for canonical, variants in BUSINESS_TYPE_KEYWORDS:
         if canonical.lower() == lower or canonical.lower() in lower or lower in canonical.lower():
             merged = [raw, canonical] + variants
+            if canonical.lower() == "medspa" and not settings.discovery_enable_explicit_medspa_synonyms:
+                merged = [term for term in merged if term.strip().lower() not in HIGH_VOLUME_MEDSPA_VARIANTS]
             return list(dict.fromkeys(m.strip() for m in merged if m.strip()))
 
     key = lower.replace(" ", "")
@@ -67,6 +80,19 @@ def _keyword_variants_for_category(category: str) -> list[str]:
         if legacy_key in key or key in legacy_key:
             return list(dict.fromkeys([raw] + variants))
     return [raw]
+
+
+def _semantic_query_key(query: DiscoveryQuery) -> tuple[str, str, str]:
+    normalized_term = " ".join((query.keyword_variant or query.category or "").lower().replace("-", " ").split())
+    synonym_groups = {
+        "medspa": {"medspa", "med spa", "medical spa", "aesthetic clinic", "botox", "laser spa"},
+    }
+    canonical = normalized_term
+    for group_name, members in synonym_groups.items():
+        if normalized_term in members:
+            canonical = group_name
+            break
+    return (query.category.strip().lower(), query.city.strip().lower(), canonical)
 
 
 def _llm_query_expansion(categories: list[str], states: list[str], model_name: str | None = None) -> list[dict[str, str]]:
@@ -102,6 +128,23 @@ def generate_discovery_queries(
     use_llm: bool = True,
     model_name: str | None = None,
 ) -> list[DiscoveryQuery]:
+    queries, _ = generate_discovery_queries_with_stats(
+        categories=categories,
+        locations=locations,
+        use_llm=use_llm,
+        model_name=model_name,
+    )
+    return queries
+
+
+def generate_discovery_queries_with_stats(
+    categories: Iterable[str],
+    locations: Iterable[str],
+    *,
+    use_llm: bool = True,
+    model_name: str | None = None,
+) -> tuple[list[DiscoveryQuery], QueryGenerationStats]:
+    stats = QueryGenerationStats()
     clean_categories = [c.strip() for c in categories if c and c.strip()]
     states = [_normalize_state(loc) for loc in locations if loc and loc.strip()]
     if not states:
@@ -110,7 +153,7 @@ def generate_discovery_queries(
     structured: list[DiscoveryQuery] = []
     for category, state in product(clean_categories, states):
         cities = NEARBY_STATE_CITIES.get(state, [])
-        terms = _keyword_variants_for_category(category)
+        terms = _keyword_variants_for_category(category)[: max(1, settings.max_queries_per_location)]
         for city, term in product(cities, terms):
             structured.append(
                 DiscoveryQuery(
@@ -121,6 +164,7 @@ def generate_discovery_queries(
                     state=state,
                 )
             )
+    stats.total_structured_planned = len(structured)
 
     if use_llm and clean_categories:
         llm_rows = _llm_query_expansion(clean_categories, states, model_name=model_name)
@@ -136,12 +180,25 @@ def generate_discovery_queries(
                 )
             )
 
-    deduped: list[DiscoveryQuery] = []
+    deduped_exact: list[DiscoveryQuery] = []
     seen: set[tuple[str, str, str, str, str]] = set()
     for q in structured:
         key = (q.query.lower(), q.category.lower(), q.keyword_variant.lower(), q.city.lower(), q.state.lower())
         if key in seen:
+            stats.skipped_exact_dedupe += 1
             continue
         seen.add(key)
-        deduped.append(q)
-    return deduped
+        deduped_exact.append(q)
+
+    deduped_semantic: list[DiscoveryQuery] = []
+    semantic_seen: set[tuple[str, str, str]] = set()
+    for q in deduped_exact:
+        semantic_key = _semantic_query_key(q)
+        if semantic_key in semantic_seen:
+            stats.skipped_semantic_dedupe += 1
+            continue
+        semantic_seen.add(semantic_key)
+        deduped_semantic.append(q)
+
+    stats.total_final = len(deduped_semantic)
+    return deduped_semantic, stats

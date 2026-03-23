@@ -17,9 +17,18 @@ class Settings(BaseSettings):
     google_places_api_key: str = ""
     yelp_api_key: str = ""
     # Lead discovery provider (canonical): DuckDuckGo HTML search
+    duckduckgo_enabled: bool = True
+    max_queries_per_location: int = 2
+    discovery_enable_explicit_medspa_synonyms: bool = False
     discovery_enable_duckduckgo_html: bool = True
     discovery_duckduckgo_html_url: str = "https://html.duckduckgo.com/html/"
-    discovery_duckduckgo_user_agent: str = "lead-enrichment-local/1.0 (+duckduckgo-discovery)"
+    discovery_duckduckgo_user_agent: str = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    duckduckgo_min_delay_seconds: float = 5.0
+    duckduckgo_max_delay_seconds: float = 12.0
+    duckduckgo_consecutive_403_threshold: int = 2
     discovery_duckduckgo_min_interval_seconds: float = 0.35
     discovery_duckduckgo_max_results_per_query: int = 12
     discovery_http_max_retries: int = 3
