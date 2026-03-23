@@ -11,8 +11,19 @@
     {% endif %}
   </p>
   <p><strong>Default fallback model:</strong> {{ default_model }}</p>
+  <p><strong>Ollama timeout:</strong> {{ ollama_timeout_seconds }} seconds <span class="small">(source: {{ ollama_timeout_source }})</span></p>
   {% if flash_message %}<p><strong>Message:</strong> {{ flash_message }}</p>{% endif %}
   {% if flash_error %}<p><strong>Error:</strong> {{ flash_error }}</p>{% endif %}
+</section>
+
+<section class="card">
+  <h3>Generation Timeout Settings</h3>
+  <p class="small">This controls how long local AI generation calls to Ollama can run before timing out.</p>
+  <form action="/settings/ollama-timeout" method="post">
+    <label for="ollama_timeout_seconds">Ollama timeout (seconds)</label>
+    <input id="ollama_timeout_seconds" name="ollama_timeout_seconds" type="number" min="1" step="1" required value="{{ ollama_timeout_seconds }}">
+    <button type="submit">Save Timeout</button>
+  </form>
 </section>
 
 <section class="card">

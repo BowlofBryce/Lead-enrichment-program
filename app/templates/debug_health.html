@@ -9,6 +9,7 @@
     <li>Ollama model available: {{ ollama_health.get("model_available", False) }}</li>
     <li>Ollama error: {{ ollama_health.get("error", "") }}</li>
     <li>Configured model: {{ ollama_model }}</li>
+    <li>Configured Ollama timeout (seconds): {{ ollama_timeout_seconds }} (source: {{ ollama_timeout_source }})</li>
     <li>Uploads dir writable/exists: {{ uploads_ok }} ({{ uploads_dir }})</li>
     <li>Exports dir writable/exists: {{ exports_ok }} ({{ exports_dir }})</li>
     <li>Pages dir writable/exists: {{ pages_ok }} ({{ pages_dir }})</li>

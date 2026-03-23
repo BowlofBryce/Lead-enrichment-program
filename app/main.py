@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.db import Base, engine, ensure_data_dirs, run_sqlite_migrations
 from app.routes import router
+from app.services.app_config import get_ollama_timeout_config
 from app.services.logging_utils import configure_logging, get_logger
 from app.settings import settings
 
@@ -22,11 +23,14 @@ def on_startup() -> None:
     ensure_data_dirs()
     Base.metadata.create_all(bind=engine)
     run_sqlite_migrations()
+    timeout_config = get_ollama_timeout_config()
     logger.info(
         "app.startup",
         extra_fields={
             "app_name": settings.app_name,
             "debug_mode": settings.debug_mode,
             "ollama_model": settings.ollama_model,
+            "ollama_timeout_seconds": timeout_config.seconds,
+            "ollama_timeout_source": timeout_config.source,
         },
     )

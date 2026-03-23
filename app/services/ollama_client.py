@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from app.services.app_config import get_ollama_timeout_seconds
 from app.services.logging_utils import get_logger
 from app.settings import settings
 
@@ -78,10 +79,11 @@ def list_models() -> list[OllamaModelInfo]:
 
 def pull_model(model_name: str) -> dict[str, Any]:
     payload = {"name": model_name, "stream": False}
+    timeout_seconds = get_ollama_timeout_seconds()
     resp = requests.post(
         f"{settings.ollama_base_url}/api/pull",
         json=payload,
-        timeout=settings.ollama_timeout_seconds,
+        timeout=timeout_seconds,
     )
     resp.raise_for_status()
     return resp.json() if resp.content else {"status": "ok"}
@@ -91,10 +93,11 @@ def create_model_preset(base_model: str, preset_name: str, system_prompt: str) -
     clean_prompt = system_prompt.strip().replace("\r\n", "\n")
     modelfile = f'FROM {base_model}\n\nSYSTEM """\n{clean_prompt}\n"""\n'
     payload = {"name": preset_name, "modelfile": modelfile, "stream": False}
+    timeout_seconds = get_ollama_timeout_seconds()
     resp = requests.post(
         f"{settings.ollama_base_url}/api/create",
         json=payload,
-        timeout=settings.ollama_timeout_seconds,
+        timeout=timeout_seconds,
     )
     if not resp.ok:
         detail = ""
@@ -129,6 +132,7 @@ def generate(
     max_tokens: int | None = None,
     expect_json: bool = False,
     model: str | None = None,
+    stage: str = "ollama_generate",
 ) -> OllamaResult:
     last_error = ""
     last_parse_error = ""
@@ -156,15 +160,22 @@ def generate(
 
     for _ in range(retries + 1):
         start = time.perf_counter()
+        timeout_seconds = get_ollama_timeout_seconds()
         try:
             logger.info(
                 "ollama.request.started",
-                extra_fields={"model": model_name, "prompt_len": len(prompt), "expect_json": expect_json},
+                extra_fields={
+                    "model": model_name,
+                    "prompt_len": len(prompt),
+                    "expect_json": expect_json,
+                    "timeout_seconds": timeout_seconds,
+                    "pipeline_stage": stage,
+                },
             )
             resp = requests.post(
                 f"{settings.ollama_base_url}/api/generate",
                 json=request_payload,
-                timeout=settings.ollama_timeout_seconds,
+                timeout=timeout_seconds,
             )
             resp.raise_for_status()
             duration_ms = int((time.perf_counter() - start) * 1000)
@@ -179,7 +190,16 @@ def generate(
 
             if error_message:
                 last_error = error_message
-                logger.warning("ollama.request.error_payload", extra_fields={"error": error_message[:180]})
+                logger.warning(
+                    "ollama.request.error_payload",
+                    extra_fields={
+                        "model": model_name,
+                        "timeout_seconds": timeout_seconds,
+                        "pipeline_stage": stage,
+                        "timed_out": False,
+                        "error": error_message[:180],
+                    },
+                )
                 continue
 
             if not expect_json:
@@ -193,9 +213,47 @@ def generate(
             last_error = "invalid_json"
             last_parse_error = parse_error
             logger.warning("ollama.invalid_json", extra_fields={"parse_error": parse_error[:180], "duration_ms": duration_ms})
-        except Exception as exc:
+        except requests.Timeout as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            last_error = "ollama_timeout"
+            logger.warning(
+                "ollama.request.failed",
+                extra_fields={
+                    "model": model_name,
+                    "timeout_seconds": timeout_seconds,
+                    "pipeline_stage": stage,
+                    "timed_out": True,
+                    "duration_ms": duration_ms,
+                    "error": str(exc),
+                },
+            )
+        except requests.RequestException as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
             last_error = str(exc)
-            logger.exception("ollama.request.failed")
+            logger.warning(
+                "ollama.request.failed",
+                extra_fields={
+                    "model": model_name,
+                    "timeout_seconds": timeout_seconds,
+                    "pipeline_stage": stage,
+                    "timed_out": False,
+                    "duration_ms": duration_ms,
+                    "error": str(exc),
+                },
+            )
+        except Exception as exc:
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            last_error = str(exc)
+            logger.exception(
+                "ollama.request.failed",
+                extra_fields={
+                    "model": model_name,
+                    "timeout_seconds": timeout_seconds,
+                    "pipeline_stage": stage,
+                    "timed_out": False,
+                    "duration_ms": duration_ms,
+                },
+            )
     return OllamaResult(False, last_raw, {}, last_error, last_parse_error, repaired, 0, request_payload, last_payload)
 
 
@@ -206,6 +264,7 @@ def generate_json(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model: str | None = None,
+    stage: str = "ollama_generate_json",
 ) -> OllamaResult:
     return generate(
         prompt=prompt,
@@ -215,4 +274,5 @@ def generate_json(
         max_tokens=max_tokens,
         expect_json=True,
         model=model,
+        stage=stage,
     )

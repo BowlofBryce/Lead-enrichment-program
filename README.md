@@ -40,6 +40,13 @@ You can now control model behavior from the UI per enrichment run:
 
 `.env`/settings still provide the **default fallback model**, but daily switching should happen in-app.
 
+### Ollama timeout configuration
+
+- Default Ollama request timeout is now `120` seconds.
+- Environment override: `OLLAMA_TIMEOUT_SECONDS` (must be a positive integer).
+- UI override: on `/models`, edit **Ollama timeout (seconds)** and save.
+- The saved UI value is persisted in the app database and used for local generation requests.
+
 ## What changed
 
 The product is now **row-first** instead of website-first. For each CSV row, it now:
@@ -195,6 +202,7 @@ If a selected model is missing at run start, the run fails gracefully with a cle
 The local models page includes:
 - live installed model list from Ollama (`name`, `size`, `modified`),
 - Ollama connectivity status,
+- editable Ollama generation timeout (`Ollama timeout (seconds)`),
 - pull form for new models,
 - local preset model creation form.
 

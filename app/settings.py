@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     default_enrichment_model: str = "qwen3:14b"
     default_schema_inference_model: str = "qwen3-coder:30b"
     default_query_generation_model: str = "qwen3:8b"
-    ollama_timeout_seconds: int = 45
+    ollama_timeout_seconds: int = Field(default=120, gt=0)
     request_timeout_seconds: int = 20
     google_places_api_key: str = ""
     yelp_api_key: str = ""

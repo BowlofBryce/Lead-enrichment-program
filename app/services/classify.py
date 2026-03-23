@@ -65,7 +65,7 @@ Website content:
 \"\"\"{crawled_text[:16000]}\"\"\"
 """.strip()
 
-    result: OllamaResult = generate_json(prompt=prompt, retries=2, model=model_name)
+    result: OllamaResult = generate_json(prompt=prompt, retries=2, model=model_name, stage="business_classification")
     resolved_model = model_name or settings.ollama_model
     if not result.ok:
         return ClassificationResult(
