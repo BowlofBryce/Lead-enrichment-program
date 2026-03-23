@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     default_query_generation_model: str = "qwen3:8b"
     ollama_timeout_seconds: int = 45
     request_timeout_seconds: int = 20
+    google_places_api_key: str = ""
+    yelp_api_key: str = ""
+    discovery_enable_osm: bool = True
+    discovery_osm_user_agent: str = "lead-enrichment-local/1.0"
+    discovery_google_min_interval_seconds: float = 0.25
+    discovery_yelp_min_interval_seconds: float = 0.3
+    discovery_osm_min_interval_seconds: float = 1.1
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

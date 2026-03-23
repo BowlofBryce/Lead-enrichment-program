@@ -32,6 +32,7 @@ class EnrichmentRun(Base):
     custom_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     schema_inference_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     search_strategy_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    discovery_run_id: Mapped[int | None] = mapped_column(ForeignKey("discovery_runs.id"), nullable=True, index=True)
 
     leads: Mapped[list["Lead"]] = relationship(back_populates="run", cascade="all,delete")
     events: Mapped[list["EnrichmentRunEvent"]] = relationship(back_populates="run", cascade="all,delete")
@@ -255,3 +256,64 @@ class EnrichmentRunEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     run: Mapped[EnrichmentRun] = relationship(back_populates="events")
+
+
+class DiscoveryRun(Base):
+    __tablename__ = "discovery_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False)
+    categories_json: Mapped[str] = mapped_column(Text, nullable=False)
+    locations_json: Mapped[str] = mapped_column(Text, nullable=False)
+    query_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    use_llm_query_expansion: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    max_retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    total_queries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    processed_queries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_raw_leads: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    deduplicated_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    valid_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    filtered_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enrichment_queued_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    leads_per_source_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pause_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    current_action_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enrichment_run_id: Mapped[int | None] = mapped_column(ForeignKey("enrichment_runs.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DiscoveryLead(Base):
+    __tablename__ = "discovery_leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("discovery_runs.id"), index=True, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="valid", nullable=False)
+    filter_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class DiscoveryEvent(Base):
+    __tablename__ = "discovery_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("discovery_runs.id"), index=True, nullable=False)
+    stage: Mapped[str] = mapped_column(String(80), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    human_message: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), default="info", nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
