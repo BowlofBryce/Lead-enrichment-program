@@ -22,7 +22,7 @@ SOURCE_MERGE_ORDER: tuple[str, ...] = (
 
 def build_enabled_sources() -> list[SourceAdapter]:
     """DuckDuckGo HTML search is the canonical and only active discovery source."""
-    if not settings.discovery_enable_duckduckgo_html:
+    if not settings.discovery_enable_duckduckgo_html or not settings.duckduckgo_enabled:
         return []
     return [DuckDuckGoHTMLSource()]
 
