@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import json
+
+from app.models import DiscoveryLead
 from app.services.lead_discovery.types import DiscoveryQuery, NormalizedLead, ParsedLead, RawBusinessRecord
 
 
 def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedLead:
     payload = raw.payload
+
+    if raw.source == "stub":
+        return ParsedLead(
+            company_name=(payload.get("name") or "").strip(),
+            address=(payload.get("address") or "").strip(),
+            city=(payload.get("city") or query.city or "").strip(),
+            state=(payload.get("state") or query.state or "").strip(),
+            phone=str(payload.get("phone") or "").strip(),
+            website=str(payload.get("website") or "").strip(),
+            category=query.category,
+            source=raw.source,
+            source_ref=str(payload.get("id") or ""),
+        )
+
     if raw.source == "google_places":
         address = payload.get("formatted_address") or ""
         return ParsedLead(
@@ -18,11 +35,14 @@ def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedL
             source=raw.source,
             source_ref=str(payload.get("place_id") or ""),
         )
-    if raw.source == "yelp":
+
+    if raw.source in ("yelp_api", "yelp"):
         location = payload.get("location") or {}
+        disp = location.get("display_address") or []
+        addr_line = disp[0] if isinstance(disp, list) and disp else ""
         return ParsedLead(
             company_name=(payload.get("name") or "").strip(),
-            address=(location.get("address1") or payload.get("location", {}).get("display_address", [""])[0] or "").strip(),
+            address=(location.get("address1") or addr_line or "").strip(),
             city=(location.get("city") or query.city or "").strip(),
             state=(location.get("state") or query.state or "").strip(),
             phone=str(payload.get("display_phone") or payload.get("phone") or "").strip(),
@@ -31,6 +51,34 @@ def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedL
             source=raw.source,
             source_ref=str(payload.get("id") or ""),
         )
+
+    if raw.source == "yelp_directory":
+        return ParsedLead(
+            company_name=(payload.get("business_name") or "").strip(),
+            address=(payload.get("address_line") or "").strip(),
+            city=query.city,
+            state=query.state,
+            phone=str(payload.get("phone") or "").strip(),
+            website=_clean_external_website(payload.get("website") or ""),
+            category=query.category,
+            source=raw.source,
+            source_ref=str(payload.get("listing_url") or ""),
+        )
+
+    if raw.source == "yellowpages_directory":
+        return ParsedLead(
+            company_name=(payload.get("business_name") or "").strip(),
+            address=(payload.get("address_line") or "").strip(),
+            city=query.city,
+            state=query.state,
+            phone=str(payload.get("phone") or "").strip(),
+            website=_clean_external_website(payload.get("website") or ""),
+            category=query.category,
+            source=raw.source,
+            source_ref=str(payload.get("listing_url") or ""),
+        )
+
+    # OpenStreetMap / Nominatim
     address_details = payload.get("address") or {}
     return ParsedLead(
         company_name=(payload.get("name") or payload.get("display_name") or "").split(",")[0].strip(),
@@ -43,6 +91,16 @@ def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedL
         source=raw.source,
         source_ref=str(payload.get("osm_id") or ""),
     )
+
+
+def _clean_external_website(url: str) -> str:
+    u = (url or "").strip()
+    if not u:
+        return ""
+    low = u.lower()
+    if "yelp.com" in low or "yellowpages.com" in low:
+        return ""
+    return u
 
 
 def to_normalized(parsed: ParsedLead, raw_payload: dict) -> NormalizedLead:
@@ -69,4 +127,27 @@ def to_normalized(parsed: ParsedLead, raw_payload: dict) -> NormalizedLead:
         address=normalize_text(parsed.address),
         source_ref=parsed.source_ref,
         raw_payload=raw_payload,
+    )
+
+
+def normalized_from_discovery_row(lead: DiscoveryLead) -> NormalizedLead:
+    """Reconstruct NormalizedLead from persisted discovery row + raw JSON."""
+    raw: dict = {}
+    if lead.raw_payload_json:
+        try:
+            raw = json.loads(lead.raw_payload_json)
+        except json.JSONDecodeError:
+            raw = {}
+    return NormalizedLead(
+        id=lead.external_id or str(lead.id),
+        company_name=lead.company_name,
+        website=lead.website or "",
+        phone=lead.phone or "",
+        city=lead.city or "",
+        state=lead.state or "",
+        category=lead.category or "",
+        source=lead.source,
+        address=lead.address or "",
+        source_ref=lead.source_ref or "",
+        raw_payload=raw,
     )

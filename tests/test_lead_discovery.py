@@ -49,6 +49,7 @@ class LeadDiscoveryTests(unittest.TestCase):
         self.assertGreater(len(queries), 0)
         self.assertTrue(any(q.city == "Provo" for q in queries))
         self.assertTrue(all(bool(q.query) for q in queries))
+        self.assertTrue(all(bool(q.keyword_variant) for q in queries))
 
     def test_normalization_standardizes_phone_and_url(self) -> None:
         self.assertEqual(normalization.clean_phone("(801) 555-1200"), "+18015551200")

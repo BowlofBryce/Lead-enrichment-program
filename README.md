@@ -2,33 +2,42 @@
 
 Local-first FastAPI + Jinja2 + SQLite lead row enrichment for Apollo-like CSV exports. No paid APIs, no cloud dependencies.
 
-## Lead Discovery module (new)
+## Lead Discovery module
 
-The app now includes a full **Lead Discovery** pipeline at `/discovery` with production-focused stages:
-1. Query generation (deterministic + optional local LLM expansion)
-2. Multi-source fetching (Google Places API, Yelp Fusion API, OpenStreetMap/Nominatim)
-3. Parsing/extraction into common fields
-4. Normalization (phone/url/city/state casing)
-5. Deduplication (website/phone exact + fuzzy name/city)
-6. Validation/quality filtering
-7. Direct enrichment handoff (auto-queues an `EnrichmentRun` with run linkage)
+Pipeline at `/discovery` uses **directory-based** sources (not generic web search engines):
 
-Live UI includes:
-- start/pause/resume controls,
-- real-time counters (raw, deduped, valid, filtered, queued),
-- human-readable “what is happening now” panel sourced from backend events,
-- timestamped activity/error stream.
+1. **Structured query generation** — categories × keyword variants × cities × states (Utah + nearby states), plus optional local LLM expansion (Ollama).
+2. **Parallel source adapters** — Yelp + Yellow Pages HTML scraping (requests + retries + rate limits; Playwright optional fallback on hard blocks).
+3. **Parsing layer** — separate HTML parsers (`parsers/yelp_html.py`, `parsers/yellowpages_html.py`) with multiple extraction strategies.
+4. **OpenStreetMap / Nominatim** — optional **fallback** only (lower priority than directories).
+5. **Normalization** — phone, URL, city/state formatting.
+6. **Deduplication** — exact website domain, exact phone, fuzzy name + city; prefers richer records (`dedupe.py` + in-run indexes for scale).
+7. **Validation** — quality filters, then **automatic enrichment handoff** (`EnrichmentRun` linked via `discovery_run_id`).
+
+Live UI:
+- Metrics: total found, duplicates removed, valid leads, per-source counts (from backend counters + `discovery_events`).
+- Status line + activity stream are **real** strings emitted by the pipeline (`DiscoveryEvent`), not hardcoded in the frontend.
 
 ### Lead Discovery environment variables
 
-Set these in `.env` for discovery sources:
-- `GOOGLE_PLACES_API_KEY`
-- `YELP_API_KEY`
-- `DISCOVERY_ENABLE_OSM=true` (default true)
+**Defaults:** Yelp + Yellow Pages scrapers ON, OSM fallback ON, Google Places + Yelp Fusion API OFF (opt-in).
+
+- `DISCOVERY_ENABLE_YELP_DIRECTORY=true`
+- `DISCOVERY_ENABLE_YELLOWPAGES_DIRECTORY=true`
+- `DISCOVERY_ENABLE_OSM_FALLBACK=true`
+- `DISCOVERY_YELP_MAX_PAGES=5` (pagination depth per query)
+- `DISCOVERY_YELLOWPAGES_MAX_PAGES=5`
+- `DISCOVERY_PARALLEL_WORKERS=3`
+- `DISCOVERY_BATCH_COMMIT_SIZE=150`
 - `DISCOVERY_OSM_USER_AGENT=lead-enrichment-local/1.0`
-- `DISCOVERY_GOOGLE_MIN_INTERVAL_SECONDS=0.25`
-- `DISCOVERY_YELP_MIN_INTERVAL_SECONDS=0.3`
-- `DISCOVERY_OSM_MIN_INTERVAL_SECONDS=1.1`
+- `DISCOVERY_YELP_MIN_INTERVAL_SECONDS`, `DISCOVERY_YELLOWPAGES_MIN_INTERVAL_SECONDS`, `DISCOVERY_OSM_MIN_INTERVAL_SECONDS`
+
+Optional paid APIs (not required):
+
+- `GOOGLE_PLACES_API_KEY` + `DISCOVERY_ENABLE_GOOGLE_PLACES=false`
+- `YELP_API_KEY` + `DISCOVERY_ENABLE_YELP_FUSION_API=false`
+
+**Limitations:** Yelp/YP may rate-limit or change HTML; respect their terms of use. Use conservative intervals; Playwright fallback helps with JS-heavy responses but is slower. Large runs (20k+) rely on batched commits and compact dedupe indexes — monitor disk and SQLite concurrency.
 
 ## New local model controls (no day-to-day `.env` edits)
 
