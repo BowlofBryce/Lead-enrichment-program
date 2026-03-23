@@ -667,14 +667,21 @@ def enrichment_debug_page(
     payload: dict[str, object] = {}
     if lead:
         extraction = lead.extraction
+        contact_payload = _debug_events_payload(lead.debug_events, "contact_extraction")
+        name_items: list[dict[str, object]] = []
+        if isinstance(contact_payload, dict):
+            items = contact_payload.get("items", [])
+            if isinstance(items, list):
+                name_items = [item for item in items if isinstance(item, dict) and item.get("type") == "name"]
         payload = {
             "lead_id": lead.id,
             "run_id": lead.run_id,
             "extracted_raw_contacts": {
+                "names": name_items,
                 "emails": _json_list(extraction.emails_json) if extraction else [],
                 "phones": _json_list(extraction.phones_json) if extraction else [],
             },
-            "phone_classifications": _debug_events_payload(lead.debug_events, "contact_extraction"),
+            "phone_classifications": contact_payload,
             "llm_input": _debug_events_payload(lead.debug_events, "decision_engine", "llm_input"),
             "llm_output": _debug_events_payload(lead.debug_events, "decision_engine", "llm_output"),
             "final_scored_result": _json_obj(lead.semantic_row_json),

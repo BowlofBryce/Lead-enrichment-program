@@ -81,7 +81,7 @@
     <table class="lead-table">
       <thead>
         <tr>
-          <th>ID</th><th>Person/Company</th><th>Anchor + Resolution</th><th>Analysis</th><th>Company Enrichment</th><th>Scores</th><th>Status</th>
+          <th>ID</th><th>Person/Company</th><th>Anchor + Resolution</th><th>Analysis</th><th>Company Enrichment</th><th>Confidence Score</th><th>Scores</th><th>Status</th>
         </tr>
       </thead>
       <tbody id="lead-rows-body">
@@ -92,7 +92,8 @@
           <td>{{ lead.anchor_type or "" }}<br>{{ lead.anchor_value or "" }}<br>source={{ lead.anchor_source or "" }}<br>resolution={{ lead.resolution_status or "" }} ({{ lead.resolution_confidence if lead.resolution_confidence is not none else "" }})</td>
           <td>missing={{ lead.fields_missing_json or "[]" }}<br>suspicious={{ lead.fields_suspicious_json or "[]" }}</td>
           <td>{{ lead.normalized_full_name or lead.full_name or "" }} ({{ lead.normalized_title or lead.title or "" }})<br>{{ lead.normalized_email or lead.email or "" }} / {{ lead.normalized_phone or lead.phone or "" }}<br>general={{ lead.public_company_phone or "" }}</td>
-          <td>confidence={{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}<br>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score }}</td>
+          <td>{{ lead.enrichment_confidence if lead.enrichment_confidence is not none else "" }}</td>
+          <td>person={{ lead.person_match_confidence if lead.person_match_confidence is not none else "" }}<br>company={{ lead.company_match_confidence if lead.company_match_confidence is not none else "" }}<br>quality={{ lead.lead_quality_score }}</td>
           <td><span class="status status-{{ lead.enrichment_status }}">{{ lead.enrichment_status }}</span><br>{{ lead.enrichment_error or "" }}</td>
         </tr>
         {% endfor %}
@@ -125,7 +126,8 @@
         <td>${fmt(lead.anchor_type)}<br>${fmt(lead.anchor_value)}<br>source=${fmt(lead.anchor_source)}<br>resolution=${fmt(lead.resolution_status)} (${fmt(lead.resolution_confidence)})</td>
         <td>missing=${fmt(lead.analysis_missing)}<br>suspicious=${fmt(lead.analysis_suspicious)}</td>
         <td>${fmt(lead.decision_maker_name)} (${fmt(lead.decision_maker_role)})<br>${fmt(lead.decision_maker_email)} / ${fmt(lead.decision_maker_phone)}<br>general=${fmt(lead.public_company_phone)}</td>
-        <td>confidence=${fmt(lead.confidence_score)}<br>person=${fmt(lead.person_match_confidence)}<br>company=${fmt(lead.company_match_confidence)}<br>quality=${fmt(lead.lead_quality_score)}</td>
+        <td>${fmt(lead.confidence_score)}</td>
+        <td>person=${fmt(lead.person_match_confidence)}<br>company=${fmt(lead.company_match_confidence)}<br>quality=${fmt(lead.lead_quality_score)}</td>
         <td><span class="status status-${fmt(lead.enrichment_status)}">${fmt(lead.enrichment_status)}</span><br>${fmt(lead.enrichment_error)}</td>
       </tr>
     `;

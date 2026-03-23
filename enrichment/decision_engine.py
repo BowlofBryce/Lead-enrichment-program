@@ -164,6 +164,9 @@ def _parse_llm_payload(payload: dict[str, object], phone_weight: float) -> Decis
 
 def run_decision_engine(extracted: ContactExtractionResult, *, model_name: str) -> DecisionEngineOutput:
     heuristic = _heuristic_decision(extracted)
+    if not extracted.items:
+        heuristic.confidence = _score(heuristic, has_only_generic=True)
+        return heuristic
 
     prompt, llm_input = _llm_prompt(extracted)
     llm_result = generate_json(
