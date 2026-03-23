@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Debug Enrichment</h2>
+<form method="get" action="/debug/enrichment" style="margin-bottom:12px;">
+  <label>Run ID <input type="text" name="run_id" value="{{ run_id }}"></label>
+  <label>Lead ID <input type="text" name="lead_id" value="{{ lead_id }}"></label>
+  <button type="submit">Load</button>
+</form>
+
+{% if not lead %}
+<p>No matching lead found.</p>
+{% else %}
+<p>Lead #{{ lead.id }} (Run #{{ lead.run_id }})</p>
+<pre>{{ payload | tojson(indent=2) }}</pre>
+{% endif %}
+{% endblock %}
