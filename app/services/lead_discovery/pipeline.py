@@ -56,16 +56,8 @@ def _retry_fetch(source: SourceAdapter, query: DiscoveryQuery, retries: int):
 
 def _human_message_for_source(source_name: str, query: DiscoveryQuery) -> str:
     kw = query.keyword_variant or query.category
-    if source_name == "yelp_directory":
-        return f"Searching Yelp for '{kw} in {query.city}, {query.state}'"
-    if source_name == "yellowpages_directory":
-        return f"Searching Yellow Pages for '{kw} in {query.city}, {query.state}'"
-    if source_name == "openstreetmap":
-        return f"OpenStreetMap fallback search: '{query.query}'"
-    if source_name == "google_places":
-        return f"Google Places API query: '{query.query}'"
-    if source_name in ("yelp_api", "yelp"):
-        return f"Yelp Fusion API search for '{kw} in {query.city}, {query.state}'"
+    if source_name == "duckduckgo_html":
+        return f"DuckDuckGo HTML search for '{kw} in {query.city}, {query.state}'"
     return f"Fetching {source_name} for '{query.query}'"
 
 
@@ -113,12 +105,21 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
     sources = build_enabled_sources()
     if not sources:
         run.status = "failed"
-        run.error_message = (
-            "No lead-discovery sources enabled. Enable Yelp/Yellow Pages directories or OSM fallback in settings."
-        )
+        run.error_message = "No lead-discovery source enabled. Enable DuckDuckGo HTML discovery in settings."
         _emit(db, run, stage="source_fetching", event_type="error", message=run.error_message, severity="error")
         db.commit()
         return
+    provider_names = [src.name for src in sources]
+    logger.info("lead_discovery_active_sources", extra={"sources": provider_names, "run_id": run.id})
+    _emit(
+        db,
+        run,
+        stage="source_fetching",
+        event_type="provider",
+        message=f"Active discovery provider(s): {', '.join(provider_names)}",
+        payload={"sources": provider_names},
+    )
+    db.commit()
 
     dedupe_state = DedupeState()
     pending_commits = 0
