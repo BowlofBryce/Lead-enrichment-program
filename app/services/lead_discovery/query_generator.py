@@ -104,7 +104,7 @@ def _llm_query_expansion(categories: list[str], states: list[str], model_name: s
         f"categories={json.dumps(categories)}\n"
         f"states={json.dumps(states)}"
     )
-    result = generate_json(prompt=prompt, temperature=0.2, retries=1, model=model_name or settings.default_query_generation_model)
+    result = generate_json(prompt=prompt, temperature=0.2, retries=1, model=model_name or settings.default_query_generation_model, stage="discovery_query_generation")
     if not result.ok or not isinstance(result.data.get("queries"), list):
         return []
     rows: list[dict[str, str]] = []

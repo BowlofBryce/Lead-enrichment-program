@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import SessionLocal, get_db
 from app.models import CSVParseDiagnostic, EnrichmentRun, EnrichmentRunEvent, Lead, LeadDebugEvent
+from app.services.app_config import get_ollama_timeout_config, set_ollama_timeout_seconds
 from app.services.csv_utils import EXPECTED_COLUMNS, export_leads_to_csv, inspect_upload_csv, lead_to_export_row
 from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
@@ -500,6 +501,7 @@ def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
 @router.get("/models")
 def models_page(request: Request):
     models_state = _load_models_state()
+    timeout_config = get_ollama_timeout_config()
     flash_message = request.query_params.get("message", "")
     flash_error = request.query_params.get("error", "")
     return templates.TemplateResponse(
@@ -512,9 +514,28 @@ def models_page(request: Request):
             "default_model": settings.ollama_model,
             "flash_message": flash_message,
             "flash_error": flash_error,
+            "ollama_timeout_seconds": timeout_config.seconds,
+            "ollama_timeout_source": timeout_config.source,
             "debug_mode": settings.debug_mode,
         },
     )
+
+
+@router.post("/settings/ollama-timeout")
+def update_ollama_timeout(
+    ollama_timeout_seconds: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    raw_value = ollama_timeout_seconds.strip()
+    try:
+        timeout_seconds = int(raw_value)
+    except ValueError:
+        return RedirectResponse(url="/models?error=Ollama+timeout+must+be+a+positive+integer", status_code=303)
+    if timeout_seconds <= 0:
+        return RedirectResponse(url="/models?error=Ollama+timeout+must+be+greater+than+zero", status_code=303)
+    set_ollama_timeout_seconds(db, timeout_seconds)
+    logger.info("settings.ollama_timeout.updated", extra_fields={"ollama_timeout_seconds": timeout_seconds, "source": "ui"})
+    return RedirectResponse(url=f"/models?message={quote_plus(f'Ollama timeout updated to {timeout_seconds} seconds')}", status_code=303)
 
 
 @router.post("/models/pull")
@@ -598,6 +619,7 @@ def llm_debug_test(
             temperature=temperature,
             max_tokens=max_tokens,
             expect_json=expect_json,
+            stage="debug_llm",
         )
         duration_ms = int((time.perf_counter() - start) * 1000)
         result = {
@@ -611,6 +633,7 @@ def llm_debug_test(
             "request_payload": reply.request_payload,
             "raw_payload": reply.raw_payload,
             "expect_json": expect_json,
+            "timed_out": reply.error == "ollama_timeout",
         }
     return templates.TemplateResponse(
         "debug_llm.html",
@@ -686,6 +709,7 @@ def health_page(request: Request, db: Session = Depends(get_db)):
         ollama_health = check_ollama_health()
     except Exception as exc:
         ollama_health = {"reachable": False, "model_available": False, "error": str(exc), "models": []}
+    timeout_config = get_ollama_timeout_config(db)
 
     return templates.TemplateResponse(
         "debug_health.html",
@@ -700,6 +724,8 @@ def health_page(request: Request, db: Session = Depends(get_db)):
             "event_count": event_count,
             "ollama_health": ollama_health,
             "ollama_model": settings.ollama_model,
+            "ollama_timeout_seconds": timeout_config.seconds,
+            "ollama_timeout_source": timeout_config.source,
             "uploads_dir": str(uploads_dir.resolve()),
             "uploads_ok": uploads_dir.exists(),
             "exports_dir": str(exports_dir.resolve()),

@@ -38,6 +38,8 @@ class DecisionEngineOutput:
     llm_input: dict[str, object]
     llm_output: dict[str, object]
     phone_weight: float
+    llm_error: str = ""
+    llm_timed_out: bool = False
 
 
 def _classify_phone_weight(phone: ContactItem) -> float:
@@ -108,6 +110,8 @@ def _heuristic_decision(extracted: ContactExtractionResult) -> DecisionEngineOut
         llm_input={},
         llm_output={},
         phone_weight=phone_weight,
+        llm_error="",
+        llm_timed_out=False,
     )
 
 
@@ -153,6 +157,8 @@ def _parse_llm_payload(payload: dict[str, object], phone_weight: float) -> Decis
         llm_input={},
         llm_output=payload,
         phone_weight=phone_weight,
+        llm_error="",
+        llm_timed_out=False,
     )
 
 
@@ -160,14 +166,30 @@ def run_decision_engine(extracted: ContactExtractionResult, *, model_name: str) 
     heuristic = _heuristic_decision(extracted)
 
     prompt, llm_input = _llm_prompt(extracted)
-    llm_result = generate_json(prompt=prompt, retries=0, temperature=0.0, max_tokens=320, model=model_name)
+    llm_result = generate_json(
+        prompt=prompt,
+        retries=0,
+        temperature=0.0,
+        max_tokens=320,
+        model=model_name,
+        stage="decision_maker_selection",
+    )
 
     parsed = llm_result.data if llm_result.ok and llm_result.data else {}
     required = {"decision_maker_name", "decision_maker_role", "decision_maker_phone", "decision_maker_email", "confidence"}
 
     if not required.issubset(set(parsed.keys())):
-        llm_result_retry = generate_json(prompt=prompt, retries=0, temperature=0.0, max_tokens=320, model=model_name)
+        llm_result_retry = generate_json(
+            prompt=prompt,
+            retries=0,
+            temperature=0.0,
+            max_tokens=320,
+            model=model_name,
+            stage="decision_maker_selection_retry",
+        )
         parsed = llm_result_retry.data if llm_result_retry.ok and llm_result_retry.data else {}
+        if getattr(llm_result_retry, "error", ""):
+            llm_result = llm_result_retry
 
     if required.issubset(set(parsed.keys())):
         best_phone_value, phone_weight = _best_phone(extracted.phones)
@@ -180,12 +202,18 @@ def run_decision_engine(extracted: ContactExtractionResult, *, model_name: str) 
         output = heuristic
         output.llm_input = llm_input
         output.llm_output = parsed
+        output.llm_error = getattr(llm_result, "error", "") or ""
+        output.llm_timed_out = output.llm_error == "ollama_timeout"
 
     generic = bool(output.decision_maker_phone) and output.phone_weight < 0.7
     output.confidence = _score(output, has_only_generic=generic)
 
     if output.confidence < 0.25:
+        previous_error = output.llm_error
+        previous_timed_out = output.llm_timed_out
         output = heuristic
+        output.llm_error = previous_error
+        output.llm_timed_out = previous_timed_out
         output.confidence = _score(output, has_only_generic=output.phone_weight < 0.7 if output.decision_maker_phone else True)
     return output
 

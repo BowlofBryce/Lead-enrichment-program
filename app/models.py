@@ -41,6 +41,18 @@ class EnrichmentRun(Base):
     )
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    setting_key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    setting_value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class Lead(Base):
     __tablename__ = "leads"
 

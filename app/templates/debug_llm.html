@@ -29,6 +29,7 @@
   <p><strong>Mode:</strong> {% if result.expect_json %}JSON{% else %}Plain Text{% endif %}</p>
   <p><strong>Duration (ms):</strong> {{ result.duration_ms or "" }}</p>
   <p><strong>Error:</strong> {{ result.error or "" }}</p>
+  <p><strong>Timed out:</strong> {{ result.timed_out if result.timed_out is defined else false }}</p>
   <h4>Request Payload</h4>
   <pre>{{ result.request_payload }}</pre>
   <h4>Raw Ollama Payload</h4>

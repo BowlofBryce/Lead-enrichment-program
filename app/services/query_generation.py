@@ -94,7 +94,7 @@ def generate_queries_if_needed(
             f"search_strategy: {json.dumps(search_strategy)}\n"
             f"custom_instructions: {custom_instructions or ''}\n"
         )
-        llm = generate_json(prompt=prompt, retries=1, temperature=0.1, model=chosen_model)
+        llm = generate_json(prompt=prompt, retries=1, temperature=0.1, model=chosen_model, stage="query_generation")
         if llm.ok and isinstance(llm.data.get("queries"), list):
             llm_queries = [str(q) for q in llm.data.get("queries", [])]
 

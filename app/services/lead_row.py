@@ -160,7 +160,7 @@ def _coerce_llm_mapping(headers: list[str], raw: dict[str, Any]) -> dict[str, st
 def pick_canonical_mapping(headers: list[str]) -> tuple[dict[str, str], list[str], list[str]]:
     heuristic_mapping, normalized_headers, warnings = _pick_heuristic_mapping(headers)
     prompt = _llm_mapping_prompt(headers)
-    result = generate_json(prompt=prompt, retries=1, temperature=0)
+    result = generate_json(prompt=prompt, retries=1, temperature=0, stage="lead_row_enrichment")
     if not result.ok:
         warnings.append(f"LLM mapping unavailable; using heuristic mapping ({result.error or 'unknown_error'}).")
         return heuristic_mapping, normalized_headers, warnings

@@ -495,6 +495,27 @@ def process_run(db: Session, run_id: int) -> None:
                 human_message="🧠 Identifying decision maker.",
             )
             decision_output = run_decision_engine(contact_result, model_name=model_to_use)
+            if decision_output.llm_timed_out:
+                timeout_message = "Decision-maker LLM timed out; using heuristic fallback."
+                _add_debug_event(
+                    db,
+                    run_id=run.id,
+                    lead_id=lead.id,
+                    stage="decision_engine",
+                    status="timeout",
+                    message=timeout_message,
+                    payload={"llm_error": decision_output.llm_error, "fallback_source": decision_output.source},
+                )
+                _emit_run_event(
+                    db,
+                    run=run,
+                    lead_id=lead.id,
+                    event_type="decision_maker",
+                    machine_status=run.status,
+                    human_message=timeout_message,
+                    severity="warning",
+                    payload={"reason": decision_output.llm_error},
+                )
             _emit_run_event(
                 db,
                 run=run,

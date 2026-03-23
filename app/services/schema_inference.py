@@ -243,7 +243,7 @@ def infer_schema_plan(
     chosen_model = (model_name or settings.default_schema_inference_model or settings.ollama_model).strip()
     prompt = _build_prompt(headers, normalized_headers, sample_rows, custom_instructions or "")
     fallback = _heuristic_plan(headers, normalized_headers, sample_rows, custom_instructions or "")
-    llm = generate_json(prompt=prompt, retries=1, temperature=0, model=chosen_model)
+    llm = generate_json(prompt=prompt, retries=1, temperature=0, model=chosen_model, stage="schema_inference")
     if not llm.ok:
         return SchemaInferenceResult(plan_json=fallback, model_used=chosen_model, source="heuristic_fallback")
     try:
