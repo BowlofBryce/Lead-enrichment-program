@@ -158,6 +158,7 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
 
     dedupe_state = DedupeState()
     pending_commits = 0
+    full_pipeline_mode = bool(run.full_pipeline_mode)
 
     def bump_commit() -> None:
         nonlocal pending_commits
@@ -247,6 +248,10 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
                         db.flush()
                         dedupe_state.add_keys(lead_model.id, normalized)
                         run.valid_count += 1
+                        if full_pipeline_mode:
+                            _enqueue_discovery_lead_for_enrichment(db, run, lead_model)
+                            if auto_start_enrichment:
+                                process_run(db, run.enrichment_run_id)
                         bump_commit()
                         continue
 
@@ -264,6 +269,10 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
                         dedupe_state.add_keys(lead_model.id, normalized)
                         run.valid_count += 1
                         run.deduplicated_count += 1
+                        if full_pipeline_mode:
+                            _enqueue_discovery_lead_for_enrichment(db, run, lead_model)
+                            if auto_start_enrichment:
+                                process_run(db, run.enrichment_run_id)
                         _emit(
                             db,
                             run,
@@ -296,6 +305,10 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
                 db.flush()
                 dedupe_state.add_keys(lead_model.id, normalized)
                 run.valid_count += 1
+                if full_pipeline_mode:
+                    _enqueue_discovery_lead_for_enrichment(db, run, lead_model)
+                    if auto_start_enrichment:
+                        process_run(db, run.enrichment_run_id)
                 bump_commit()
 
             run.leads_per_source_json = _inc_source_count(run.leads_per_source_json, src_name, len(records))
@@ -314,22 +327,25 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
     if pending_commits:
         db.commit()
 
-    _emit(
-        db,
-        run,
-        stage="enrichment_handoff",
-        event_type="handoff",
-        message=f"Sending {run.valid_count} leads to enrichment pipeline",
-        payload={"valid_count": run.valid_count},
-    )
-    enrichment_run = _queue_enrichment_from_discovery(db, run)
-    run.enrichment_run_id = enrichment_run.id
-    run.enrichment_queued_count = run.valid_count
+    if full_pipeline_mode and run.enrichment_run_id:
+        enrichment_run = db.get(EnrichmentRun, run.enrichment_run_id)
+    else:
+        _emit(
+            db,
+            run,
+            stage="enrichment_handoff",
+            event_type="handoff",
+            message=f"Sending {run.valid_count} leads to enrichment pipeline",
+            payload={"valid_count": run.valid_count},
+        )
+        enrichment_run = _queue_enrichment_from_discovery(db, run)
+        run.enrichment_run_id = enrichment_run.id
+        run.enrichment_queued_count = run.valid_count
     run.status = "completed"
     run.completed_at = datetime.utcnow()
     db.commit()
 
-    if auto_start_enrichment:
+    if auto_start_enrichment and enrichment_run is not None:
         process_run(db, enrichment_run.id)
 
 
@@ -371,6 +387,91 @@ def _inc_source_count(source_json: str | None, source_name: str, add: int) -> st
     obj = json.loads(source_json or "{}")
     obj[source_name] = int(obj.get(source_name, 0)) + int(add)
     return json.dumps(obj)
+
+
+def _enqueue_discovery_lead_for_enrichment(db: Session, run: DiscoveryRun, lead: DiscoveryLead) -> EnrichmentRun:
+    enrichment_run = db.get(EnrichmentRun, run.enrichment_run_id) if run.enrichment_run_id else None
+    if enrichment_run is None:
+        enrichment_run = EnrichmentRun(
+            filename=f"discovery_run_{run.id}.generated.csv",
+            status="queued",
+            total_rows=0,
+            processed_rows=0,
+            discovery_run_id=run.id,
+        )
+        db.add(enrichment_run)
+        db.flush()
+        run.enrichment_run_id = enrichment_run.id
+        run.enrichment_queued_count = 0
+        db.add(
+            CSVParseDiagnostic(
+                run_id=enrichment_run.id,
+                original_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
+                normalized_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
+                header_mapping_json=json.dumps(
+                    {
+                        "company_name": "company_name",
+                        "website": "website",
+                        "phone": "phone",
+                        "city": "city",
+                        "state": "state",
+                        "address": "address",
+                    }
+                ),
+                detected_row_count=0,
+                preview_rows_json=json.dumps([]),
+                cleaned_preview_rows_json=json.dumps([]),
+                warnings_json=json.dumps([]),
+            )
+        )
+
+    row = {
+        "company_name": lead.company_name,
+        "website": lead.website,
+        "phone": lead.phone,
+        "city": lead.city,
+        "state": lead.state,
+        "address": lead.address,
+        "discovery_source": lead.source,
+        "discovery_category": lead.category,
+        "discovery_run_id": run.id,
+    }
+    db.add(
+        Lead(
+            run_id=enrichment_run.id,
+            original_row_json=json.dumps(row),
+            original_company_name=lead.company_name,
+            original_website=lead.website,
+            original_city=lead.city,
+            original_state=lead.state,
+            original_phone=lead.phone,
+            original_address=lead.address,
+            enrichment_status="pending",
+        )
+    )
+    enrichment_run.total_rows += 1
+    run.enrichment_queued_count += 1
+    if enrichment_run.csv_diagnostic:
+        diag = enrichment_run.csv_diagnostic
+        diag.detected_row_count = enrichment_run.total_rows
+        preview_rows = json.loads(diag.preview_rows_json or "[]")
+        if len(preview_rows) < 20:
+            preview_rows.append(
+                {
+                    "company_name": lead.company_name,
+                    "website": lead.website,
+                    "phone": lead.phone,
+                    "city": lead.city,
+                    "state": lead.state,
+                    "address": lead.address,
+                }
+            )
+            diag.preview_rows_json = json.dumps(preview_rows)
+    if enrichment_run.status == "completed":
+        enrichment_run.status = "queued"
+        enrichment_run.completed_at = None
+    db.commit()
+    return enrichment_run
 
 
 def _queue_enrichment_from_discovery(db: Session, run: DiscoveryRun) -> EnrichmentRun:
