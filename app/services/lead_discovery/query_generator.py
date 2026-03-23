@@ -10,13 +10,22 @@ from app.settings import settings
 
 
 NEARBY_STATE_CITIES: dict[str, list[str]] = {
-    "UT": ["Salt Lake City", "Provo", "Ogden", "St George", "Lehi", "Orem"],
-    "ID": ["Boise", "Idaho Falls", "Nampa"],
-    "NV": ["Las Vegas", "Henderson", "Reno"],
-    "AZ": ["Phoenix", "Scottsdale", "Mesa"],
-    "CO": ["Denver", "Colorado Springs", "Fort Collins"],
+    "UT": ["Salt Lake City", "Provo", "Ogden", "St George", "Lehi", "Orem", "Park City", "West Valley City"],
+    "ID": ["Boise", "Idaho Falls", "Nampa", "Meridian"],
+    "NV": ["Las Vegas", "Henderson", "Reno", "North Las Vegas"],
+    "AZ": ["Phoenix", "Scottsdale", "Mesa", "Tucson", "Chandler"],
+    "CO": ["Denver", "Colorado Springs", "Fort Collins", "Aurora"],
     "WY": ["Cheyenne", "Casper", "Laramie"],
 }
+
+# Canonical business types → search keyword variants (directory queries, not web search engines).
+BUSINESS_TYPE_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("MedSpa", ["med spa", "medical spa", "aesthetic clinic", "botox", "laser spa"]),
+    ("Remodelers", ["home remodeler", "kitchen remodel", "bathroom remodel", "home renovation"]),
+    ("Window Installers", ["window installation", "replacement windows", "window contractor"]),
+    ("Luxury Pool Builders", ["luxury pool builder", "custom pool builder", "inground pool contractor"]),
+    ("Exotic Car Rentals", ["exotic car rental", "luxury car rental", "supercar rental"]),
+]
 
 CATEGORY_SYNONYMS: dict[str, list[str]] = {
     "medspa": ["med spa", "aesthetic clinic", "botox clinic"],
@@ -42,19 +51,30 @@ def _normalize_state(state: str) -> str:
     return mapping.get(token, token[:2])
 
 
-def _expand_keywords(category: str) -> list[str]:
-    key = (category or "").strip().lower()
-    for canonical, variants in CATEGORY_SYNONYMS.items():
-        if canonical in key or key in canonical:
-            return [category] + variants
-    return [category]
+def _keyword_variants_for_category(category: str) -> list[str]:
+    """Return [display category] + synonym variants for structured directory queries."""
+    raw = (category or "").strip()
+    if not raw:
+        return []
+    lower = raw.lower()
+    for canonical, variants in BUSINESS_TYPE_KEYWORDS:
+        if canonical.lower() == lower or canonical.lower() in lower or lower in canonical.lower():
+            merged = [raw, canonical] + variants
+            return list(dict.fromkeys(m.strip() for m in merged if m.strip()))
+
+    key = lower.replace(" ", "")
+    for legacy_key, variants in CATEGORY_SYNONYMS.items():
+        if legacy_key in key or key in legacy_key:
+            return list(dict.fromkeys([raw] + variants))
+    return [raw]
 
 
 def _llm_query_expansion(categories: list[str], states: list[str], model_name: str | None = None) -> list[dict[str, str]]:
     prompt = (
-        "Generate up to 30 focused local-business search intents for lead discovery. "
-        "Return strict JSON with key `queries` where each item has category, city, state, phrase. "
-        "Use realistic city/state pairs.\n"
+        "Generate up to 30 focused local-business directory-style search phrases for lead discovery. "
+        "Return strict JSON with key `queries` where each item has category, city, state, keyword_variant, phrase. "
+        "keyword_variant is the short term used with Yelp/Yellow Pages (e.g. 'med spa'). "
+        "Use realistic city/state pairs in Utah and nearby states.\n"
         f"categories={json.dumps(categories)}\n"
         f"states={json.dumps(states)}"
     )
@@ -69,8 +89,9 @@ def _llm_query_expansion(categories: list[str], states: list[str], model_name: s
         city = str(row.get("city", "")).strip()
         state = _normalize_state(str(row.get("state", "")).strip())
         phrase = str(row.get("phrase", "")).strip()
+        kw = str(row.get("keyword_variant", "")).strip() or phrase
         if category and city and state and phrase:
-            rows.append({"category": category, "city": city, "state": state, "phrase": phrase})
+            rows.append({"category": category, "city": city, "state": state, "phrase": phrase, "keyword_variant": kw})
     return rows
 
 
@@ -89,12 +110,13 @@ def generate_discovery_queries(
     structured: list[DiscoveryQuery] = []
     for category, state in product(clean_categories, states):
         cities = NEARBY_STATE_CITIES.get(state, [])
-        terms = _expand_keywords(category)
+        terms = _keyword_variants_for_category(category)
         for city, term in product(cities, terms):
             structured.append(
                 DiscoveryQuery(
                     query=f"{term} in {city}, {state}",
                     category=category,
+                    keyword_variant=term,
                     city=city,
                     state=state,
                 )
@@ -103,19 +125,21 @@ def generate_discovery_queries(
     if use_llm and clean_categories:
         llm_rows = _llm_query_expansion(clean_categories, states, model_name=model_name)
         for row in llm_rows:
+            kw = row.get("keyword_variant") or row["phrase"]
             structured.append(
                 DiscoveryQuery(
                     query=f"{row['phrase']} in {row['city']}, {row['state']}",
                     category=row["category"],
+                    keyword_variant=kw,
                     city=row["city"],
                     state=row["state"],
                 )
             )
 
     deduped: list[DiscoveryQuery] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
     for q in structured:
-        key = (q.query.lower(), q.category.lower(), q.city.lower(), q.state.lower())
+        key = (q.query.lower(), q.category.lower(), q.keyword_variant.lower(), q.city.lower(), q.state.lower())
         if key in seen:
             continue
         seen.add(key)

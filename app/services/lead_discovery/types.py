@@ -7,8 +7,11 @@ from typing import Any
 
 @dataclass(slots=True)
 class DiscoveryQuery:
+    """Structured query for directory adapters."""
+
     query: str
     category: str
+    keyword_variant: str
     city: str
     state: str
 

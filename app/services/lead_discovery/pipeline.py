@@ -2,18 +2,25 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app.models import CSVParseDiagnostic, DiscoveryEvent, DiscoveryLead, DiscoveryRun, EnrichmentRun, Lead
 from app.services.enrichment import process_run
-from app.services.lead_discovery.dedupe import choose_best, is_duplicate
-from app.services.lead_discovery.parsing import parse_raw_business, to_normalized
+from app.services.lead_discovery.dedupe import DedupeState, choose_best
+from app.services.lead_discovery.normalization import website_domain
+from app.services.lead_discovery.parsing import (
+    normalized_from_discovery_row,
+    parse_raw_business,
+    to_normalized,
+)
 from app.services.lead_discovery.query_generator import generate_discovery_queries
-from app.services.lead_discovery.sources import SourceAdapter, build_enabled_sources
+from app.services.lead_discovery.sources import SourceAdapter, build_enabled_sources, merge_order_index
+from app.services.lead_discovery.types import DiscoveryQuery, NormalizedLead
 from app.services.lead_discovery.validation import validate_lead
 from app.services.logging_utils import get_logger
+from app.settings import settings
 
 
 logger = get_logger(__name__)
@@ -33,15 +40,52 @@ def _emit(db: Session, run: DiscoveryRun, *, stage: str, event_type: str, messag
     )
 
 
-def _retry_fetch(source: SourceAdapter, query, retries: int = 2, delay: float = 1.0):
+def _retry_fetch(source: SourceAdapter, query: DiscoveryQuery, retries: int):
+    last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:
             return source.fetch(query)
-        except Exception:
+        except Exception as exc:
+            last_exc = exc
             if attempt >= retries:
                 raise
-            time.sleep(delay * (attempt + 1))
-    return []
+            delay = settings.discovery_retry_backoff_seconds * (attempt + 1)
+            time.sleep(delay)
+    raise last_exc  # pragma: no cover
+
+
+def _human_message_for_source(source_name: str, query: DiscoveryQuery) -> str:
+    kw = query.keyword_variant or query.category
+    if source_name == "yelp_directory":
+        return f"Searching Yelp for '{kw} in {query.city}, {query.state}'"
+    if source_name == "yellowpages_directory":
+        return f"Searching Yellow Pages for '{kw} in {query.city}, {query.state}'"
+    if source_name == "openstreetmap":
+        return f"OpenStreetMap fallback search: '{query.query}'"
+    if source_name == "google_places":
+        return f"Google Places API query: '{query.query}'"
+    if source_name in ("yelp_api", "yelp"):
+        return f"Yelp Fusion API search for '{kw} in {query.city}, {query.state}'"
+    return f"Fetching {source_name} for '{query.query}'"
+
+
+def _fetch_sources_parallel(sources: list[SourceAdapter], query: DiscoveryQuery, retries: int) -> tuple[dict[str, list], dict[str, str]]:
+    if not sources:
+        return {}, {}
+    max_workers = max(1, min(len(sources), settings.discovery_parallel_workers))
+    results: dict[str, list] = {}
+    errors: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_retry_fetch, src, query, retries): src for src in sources}
+        for fut in as_completed(futures):
+            src = futures[fut]
+            try:
+                results[src.name] = fut.result()
+            except Exception as exc:
+                logger.warning("source_fetch_failed", extra={"source": src.name, "error": str(exc)})
+                results[src.name] = []
+                errors[src.name] = str(exc)
+    return results, errors
 
 
 def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bool = True) -> None:
@@ -55,7 +99,13 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
 
     categories = json.loads(run.categories_json or "[]")
     locations = json.loads(run.locations_json or "[]")
-    _emit(db, run, stage="query_generation", event_type="stage", message=f"Generating search queries for {', '.join(categories)} in {', '.join(locations)}")
+    _emit(
+        db,
+        run,
+        stage="query_generation",
+        event_type="stage",
+        message=f"Generating structured queries for categories {categories} across locations {locations}",
+    )
     queries = generate_discovery_queries(categories, locations, use_llm=run.use_llm_query_expansion, model_name=run.query_model)
     run.total_queries = len(queries)
     db.commit()
@@ -63,12 +113,22 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
     sources = build_enabled_sources()
     if not sources:
         run.status = "failed"
-        run.error_message = "No lead-discovery sources are enabled. Configure API keys or enable OSM."
+        run.error_message = (
+            "No lead-discovery sources enabled. Enable Yelp/Yellow Pages directories or OSM fallback in settings."
+        )
         _emit(db, run, stage="source_fetching", event_type="error", message=run.error_message, severity="error")
         db.commit()
         return
 
-    winners: list[WinnerRecord] = []
+    dedupe_state = DedupeState()
+    pending_commits = 0
+
+    def bump_commit() -> None:
+        nonlocal pending_commits
+        pending_commits += 1
+        if pending_commits >= settings.discovery_batch_commit_size:
+            db.commit()
+            pending_commits = 0
 
     for query in queries:
         db.refresh(run)
@@ -78,26 +138,41 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
             db.commit()
             return
 
-        for source in sources:
-            _emit(db, run, stage="source_fetching", event_type="fetch", message=f"Querying {source.name} for '{query.query}'")
-            db.commit()
-            try:
-                records = _retry_fetch(source, query, retries=run.max_retries)
-            except Exception as exc:
-                _emit(
-                    db,
-                    run,
-                    stage="source_fetching",
-                    event_type="retry_exhausted",
-                    message=f"{source.name} failed for '{query.query}': {exc}",
-                    severity="error",
-                )
-                db.commit()
-                continue
+        for src in sources:
+            _emit(db, run, stage="source_fetching", event_type="status", message=_human_message_for_source(src.name, query))
+        db.commit()
 
-            source_count = 0
+        source_results, source_errors = _fetch_sources_parallel(sources, query, run.max_retries)
+        for sname, err in source_errors.items():
+            _emit(
+                db,
+                run,
+                stage="source_fetching",
+                event_type="retry_exhausted",
+                message=f"{sname} failed: {err}",
+                severity="warning",
+            )
+        db.commit()
+
+        ordered_names = sorted(source_results.keys(), key=merge_order_index)
+        for src_name in ordered_names:
+            records = source_results.get(src_name) or []
+            page_hint = ""
+            if records and isinstance(records[0].payload, dict):
+                pg = records[0].payload.get("search_page")
+                if pg:
+                    page_hint = f" — results page {pg}"
+            _emit(
+                db,
+                run,
+                stage="parsing",
+                event_type="parse",
+                message=f"Parsing {len(records)} businesses from {src_name.replace('_', ' ')}{page_hint}",
+                payload={"source": src_name, "count": len(records)},
+            )
+            db.commit()
+
             for raw in records:
-                source_count += 1
                 run.total_raw_leads += 1
                 parsed = parse_raw_business(raw, query)
                 normalized = to_normalized(parsed, raw.payload)
@@ -109,50 +184,94 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
                     candidate.filter_reason = reason
                     run.filtered_count += 1
                     db.add(candidate.to_model())
+                    bump_commit()
                     continue
 
-                duplicate_idx = -1
-                duplicate_reason = ""
-                for idx, winner in enumerate(winners):
-                    dup, dup_reason = is_duplicate(winner.normalized, normalized)
-                    if dup:
-                        duplicate_idx = idx
-                        duplicate_reason = dup_reason
-                        break
+                dup_id, dup_reason = dedupe_state.find_match(normalized)
+                if dup_id is not None:
+                    winner_row = db.get(DiscoveryLead, dup_id)
+                    if winner_row is None:
+                        candidate.status = "valid"
+                        lead_model = candidate.to_model()
+                        db.add(lead_model)
+                        db.flush()
+                        dedupe_state.add_keys(lead_model.id, normalized)
+                        run.valid_count += 1
+                        bump_commit()
+                        continue
 
-                if duplicate_idx >= 0:
-                    winner = winners[duplicate_idx]
-                    result = choose_best(winner.normalized, normalized)
+                    winner_norm = normalized_from_discovery_row(winner_row)
+                    result = choose_best(winner_norm, normalized)
                     if result.chosen.id == normalized.id:
-                        db.query(DiscoveryLead).filter(DiscoveryLead.id == winner.discovery_lead_id).update(
-                            {"status": "duplicate", "filter_reason": duplicate_reason}
+                        db.query(DiscoveryLead).filter(DiscoveryLead.id == dup_id).update(
+                            {"status": "duplicate", "filter_reason": dup_reason}
                         )
                         candidate.status = "valid"
                         lead_model = candidate.to_model()
                         db.add(lead_model)
                         db.flush()
-                        winners[duplicate_idx] = WinnerRecord(normalized=normalized, discovery_lead_id=lead_model.id)
+                        dedupe_state.remove_keys(dup_id, winner_norm)
+                        dedupe_state.add_keys(lead_model.id, normalized)
+                        run.valid_count += 1
+                        run.deduplicated_count += 1
+                        _emit(
+                            db,
+                            run,
+                            stage="deduplication",
+                            event_type="dedupe",
+                            message=f"Removing duplicate ({dup_reason}) — keeping richer record for {normalized.company_name}",
+                            payload={"reason": dup_reason, "kept_lead_id": lead_model.id},
+                        )
+                        db.commit()
                     else:
                         candidate.status = "duplicate"
-                        candidate.filter_reason = duplicate_reason
+                        candidate.filter_reason = dup_reason
                         db.add(candidate.to_model())
-                    run.deduplicated_count += 1
-                else:
-                    candidate.status = "valid"
-                    lead_model = candidate.to_model()
-                    db.add(lead_model)
-                    db.flush()
-                    winners.append(WinnerRecord(normalized=normalized, discovery_lead_id=lead_model.id))
-                    run.valid_count += 1
+                        run.deduplicated_count += 1
+                        _emit(
+                            db,
+                            run,
+                            stage="deduplication",
+                            event_type="dedupe",
+                            message=f"Removing duplicates — skipped {normalized.company_name} ({dup_reason})",
+                            payload={"reason": dup_reason},
+                        )
+                        db.commit()
+                    bump_commit()
+                    continue
 
-            run.leads_per_source_json = _inc_source_count(run.leads_per_source_json, source.name, source_count)
-            _emit(db, run, stage="parsing", event_type="parse", message=f"Parsing {source_count} businesses from {source.name} results")
+                candidate.status = "valid"
+                lead_model = candidate.to_model()
+                db.add(lead_model)
+                db.flush()
+                dedupe_state.add_keys(lead_model.id, normalized)
+                run.valid_count += 1
+                bump_commit()
+
+            run.leads_per_source_json = _inc_source_count(run.leads_per_source_json, src_name, len(records))
+            _emit(
+                db,
+                run,
+                stage="normalization",
+                event_type="normalize",
+                message=f"Extracting phone numbers and websites — normalized {len(records)} rows from {src_name}",
+            )
             db.commit()
 
         run.processed_queries += 1
         db.commit()
 
-    _emit(db, run, stage="enrichment_handoff", event_type="handoff", message=f"Sending {run.valid_count} leads to enrichment pipeline")
+    if pending_commits:
+        db.commit()
+
+    _emit(
+        db,
+        run,
+        stage="enrichment_handoff",
+        event_type="handoff",
+        message=f"Sending {run.valid_count} leads to enrichment pipeline",
+        payload={"valid_count": run.valid_count},
+    )
     enrichment_run = _queue_enrichment_from_discovery(db, run)
     run.enrichment_run_id = enrichment_run.id
     run.enrichment_queued_count = run.valid_count
@@ -165,39 +284,37 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
 
 
 class NormalizedLeadProxy:
-    def __init__(self, run_id: int, normalized, status: str = "valid", filter_reason: str = ""):
+    def __init__(self, run_id: int, normalized: NormalizedLead, status: str = "valid", filter_reason: str = ""):
         self.run_id = run_id
         self.normalized = normalized
         self.status = status
         self.filter_reason = filter_reason
 
     @classmethod
-    def from_normalized(cls, run_id: int, normalized):
+    def from_normalized(cls, run_id: int, normalized: NormalizedLead) -> NormalizedLeadProxy:
         return cls(run_id, normalized)
 
     def to_model(self) -> DiscoveryLead:
+        phone_val = self.normalized.phone or ""
+        domain_val = website_domain(self.normalized.website) if self.normalized.website else ""
         return DiscoveryLead(
             run_id=self.run_id,
             external_id=self.normalized.id,
             company_name=self.normalized.company_name,
-            website=self.normalized.website,
-            phone=self.normalized.phone,
-            city=self.normalized.city,
-            state=self.normalized.state,
-            address=self.normalized.address,
-            category=self.normalized.category,
+            website=self.normalized.website or None,
+            phone=phone_val or None,
+            norm_phone=phone_val or None,
+            norm_domain=domain_val or None,
+            city=self.normalized.city or None,
+            state=self.normalized.state or None,
+            address=self.normalized.address or None,
+            category=self.normalized.category or None,
             source=self.normalized.source,
-            source_ref=self.normalized.source_ref,
+            source_ref=self.normalized.source_ref or None,
             raw_payload_json=json.dumps(self.normalized.raw_payload),
             status=self.status,
-            filter_reason=self.filter_reason,
+            filter_reason=self.filter_reason or None,
         )
-
-
-@dataclass
-class WinnerRecord:
-    normalized: object
-    discovery_lead_id: int
 
 
 def _inc_source_count(source_json: str | None, source_name: str, add: int) -> str:
@@ -207,57 +324,32 @@ def _inc_source_count(source_json: str | None, source_name: str, add: int) -> st
 
 
 def _queue_enrichment_from_discovery(db: Session, run: DiscoveryRun) -> EnrichmentRun:
-    valid_leads = (
-        db.query(DiscoveryLead)
-        .filter(DiscoveryLead.run_id == run.id, DiscoveryLead.status == "valid")
-        .order_by(DiscoveryLead.id.asc())
-        .all()
-    )
+    base_q = db.query(DiscoveryLead).filter(DiscoveryLead.run_id == run.id, DiscoveryLead.status == "valid").order_by(DiscoveryLead.id)
+    total = base_q.count()
+
     enrichment_run = EnrichmentRun(
         filename=f"discovery_run_{run.id}.generated.csv",
         status="queued",
-        total_rows=len(valid_leads),
+        total_rows=total,
         processed_rows=0,
         discovery_run_id=run.id,
     )
     db.add(enrichment_run)
     db.flush()
 
-    db.add(
-        CSVParseDiagnostic(
-            run_id=enrichment_run.id,
-            original_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
-            normalized_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
-            header_mapping_json=json.dumps(
+    preview: list[dict] = []
+    for lead in base_q.yield_per(500):
+        if len(preview) < 20:
+            preview.append(
                 {
-                    "company_name": "company_name",
-                    "website": "website",
-                    "phone": "phone",
-                    "city": "city",
-                    "state": "state",
-                    "address": "address",
+                    "company_name": lead.company_name,
+                    "website": lead.website,
+                    "phone": lead.phone,
+                    "city": lead.city,
+                    "state": lead.state,
+                    "address": lead.address,
                 }
-            ),
-            detected_row_count=len(valid_leads),
-            preview_rows_json=json.dumps(
-                [
-                    {
-                        "company_name": lead.company_name,
-                        "website": lead.website,
-                        "phone": lead.phone,
-                        "city": lead.city,
-                        "state": lead.state,
-                        "address": lead.address,
-                    }
-                    for lead in valid_leads[:20]
-                ]
-            ),
-            cleaned_preview_rows_json=json.dumps([]),
-            warnings_json=json.dumps([]),
-        )
-    )
-
-    for lead in valid_leads:
+            )
         row = {
             "company_name": lead.company_name,
             "website": lead.website,
@@ -282,5 +374,27 @@ def _queue_enrichment_from_discovery(db: Session, run: DiscoveryRun) -> Enrichme
                 enrichment_status="pending",
             )
         )
+
+    db.add(
+        CSVParseDiagnostic(
+            run_id=enrichment_run.id,
+            original_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
+            normalized_headers_json=json.dumps(["company_name", "website", "phone", "city", "state", "address"]),
+            header_mapping_json=json.dumps(
+                {
+                    "company_name": "company_name",
+                    "website": "website",
+                    "phone": "phone",
+                    "city": "city",
+                    "state": "state",
+                    "address": "address",
+                }
+            ),
+            detected_row_count=total,
+            preview_rows_json=json.dumps(preview),
+            cleaned_preview_rows_json=json.dumps([]),
+            warnings_json=json.dumps([]),
+        )
+    )
     db.commit()
     return enrichment_run

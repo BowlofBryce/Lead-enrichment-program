@@ -294,6 +294,8 @@ class DiscoveryLead(Base):
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     website: Mapped[str | None] = mapped_column(String(500), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    norm_phone: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    norm_domain: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     city: Mapped[str | None] = mapped_column(String(120), nullable=True)
     state: Mapped[str | None] = mapped_column(String(60), nullable=True)
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)

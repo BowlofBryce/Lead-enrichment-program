@@ -102,6 +102,10 @@ def run_sqlite_migrations() -> None:
             "severity": "VARCHAR(16)",
             "payload_json": "TEXT",
         },
+        "discovery_leads": {
+            "norm_phone": "VARCHAR(32)",
+            "norm_domain": "VARCHAR(255)",
+        },
         "enrichment_runs": {
             "selected_model": "VARCHAR(120)",
             "schema_inference_model": "VARCHAR(120)",
