@@ -89,6 +89,35 @@ class LeadDiscoveryTests(unittest.TestCase):
             valid = db.query(DiscoveryLead).filter(DiscoveryLead.run_id == run.id, DiscoveryLead.status == "valid").count()
             self.assertEqual(valid, enrichment.total_rows)
 
+    def test_full_pipeline_mode_enriches_as_leads_are_found(self) -> None:
+        process_calls: list[int] = []
+
+        def _capture_process_run(db, enrichment_run_id):
+            count = db.query(Lead).filter(Lead.run_id == enrichment_run_id).count()
+            process_calls.append(count)
+
+        pipeline.process_run = _capture_process_run
+
+        with self.Session() as db:
+            run = DiscoveryRun(
+                status="queued",
+                categories_json=json.dumps(["MedSpa"]),
+                locations_json=json.dumps(["UT"]),
+                use_llm_query_expansion=False,
+                full_pipeline_mode=True,
+                max_retries=1,
+            )
+            db.add(run)
+            db.commit()
+            process_discovery_run(db, run.id, auto_start_enrichment=True)
+            db.refresh(run)
+
+            self.assertEqual(run.status, "completed")
+            self.assertIsNotNone(run.enrichment_run_id)
+            self.assertEqual(run.enrichment_queued_count, run.valid_count)
+            self.assertGreaterEqual(len(process_calls), 1)
+            self.assertEqual(process_calls, sorted(process_calls))
+
 
 if __name__ == "__main__":
     unittest.main()
