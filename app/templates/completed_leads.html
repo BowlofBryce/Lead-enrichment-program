@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="run-header">
+    <div>
+      <h2>Completed Leads Board</h2>
+      <p class="muted">All leads with finished enrichment across every run. Export this list any time.</p>
+    </div>
+    <div class="run-header-controls">
+      <span class="badge">{{ completed_count }} completed</span>
+      <a href="/leads/completed/export" class="button">Export completed leads CSV</a>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Lead</th>
+          <th>Company</th>
+          <th>Email</th>
+          <th>Phone</th>
+          <th>Location</th>
+          <th>Run</th>
+          <th>Updated</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lead in leads %}
+        <tr>
+          <td>{{ lead.normalized_full_name or lead.full_name or "—" }}</td>
+          <td>{{ lead.normalized_company_name or lead.company_name or lead.original_company_name or "—" }}</td>
+          <td>{{ lead.normalized_email or lead.email or lead.public_company_email or lead.original_email or "—" }}</td>
+          <td>{{ lead.normalized_phone or lead.phone or lead.public_company_phone or lead.original_phone or "—" }}</td>
+          <td>{{ lead.city or lead.original_city or "" }}{% if lead.state or lead.original_state %}, {{ lead.state or lead.original_state }}{% endif %}</td>
+          <td><a href="/runs/{{ lead.run_id }}">#{{ lead.run_id }}</a></td>
+          <td>{{ lead.updated_at }}</td>
+          <td><a href="/leads/{{ lead.id }}">View</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted">No completed leads yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

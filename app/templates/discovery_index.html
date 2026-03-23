@@ -14,6 +14,7 @@
     <label><strong>Max retries per failed request</strong></label>
     <input type="number" min="0" max="5" name="max_retries" value="2">
     <label class="checkbox-line"><input type="checkbox" name="use_llm" checked> Enable LLM query expansion</label>
+    <label class="checkbox-line"><input type="checkbox" name="full_pipeline_mode"> Enable full pipeline mode (discover → enrich → add to completed leads board)</label>
     <button type="submit">Start discovery run</button>
   </form>
 </section>
@@ -24,19 +25,20 @@
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>ID</th><th>Status</th><th>Queries</th><th>Valid Leads</th><th>Enrichment</th><th>Created</th></tr></thead>
+      <thead><tr><th>ID</th><th>Status</th><th>Mode</th><th>Queries</th><th>Valid Leads</th><th>Enrichment</th><th>Created</th></tr></thead>
       <tbody>
         {% for run in runs %}
         <tr>
           <td><a href="/discovery/runs/{{ run.id }}">#{{ run.id }}</a></td>
           <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+          <td>{% if run.full_pipeline_mode %}Full pipeline{% else %}Discovery only{% endif %}</td>
           <td>{{ run.processed_queries }} / {{ run.total_queries }}</td>
           <td>{{ run.valid_count }}</td>
           <td>{% if run.enrichment_run_id %}<a href="/runs/{{ run.enrichment_run_id }}">Run #{{ run.enrichment_run_id }}</a>{% else %}—{% endif %}</td>
           <td>{{ run.created_at }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="muted">No discovery runs yet.</td></tr>
+        <tr><td colspan="7" class="muted">No discovery runs yet.</td></tr>
         {% endfor %}
       </tbody>
     </table>

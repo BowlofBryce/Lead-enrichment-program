@@ -279,6 +279,7 @@ class DiscoveryRun(Base):
     locations_json: Mapped[str] = mapped_column(Text, nullable=False)
     query_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     use_llm_query_expansion: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    full_pipeline_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     max_retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     total_queries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     processed_queries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
