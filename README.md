@@ -4,15 +4,14 @@ Local-first FastAPI + Jinja2 + SQLite lead row enrichment for Apollo-like CSV ex
 
 ## Lead Discovery module
 
-Pipeline at `/discovery` uses **directory-based** sources (not generic web search engines):
+Pipeline at `/discovery` uses **DuckDuckGo HTML web search** as the canonical discovery provider:
 
 1. **Structured query generation** — categories × keyword variants × cities × states (Utah + nearby states), plus optional local LLM expansion (Ollama).
-2. **Parallel source adapters** — Yelp + Yellow Pages HTML scraping (requests + retries + rate limits; Playwright optional fallback on hard blocks).
-3. **Parsing layer** — separate HTML parsers (`parsers/yelp_html.py`, `parsers/yellowpages_html.py`) with multiple extraction strategies.
-4. **OpenStreetMap / Nominatim** — optional **fallback** only (lower priority than directories).
-5. **Normalization** — phone, URL, city/state formatting.
-6. **Deduplication** — exact website domain, exact phone, fuzzy name + city; prefers richer records (`dedupe.py` + in-run indexes for scale).
-7. **Validation** — quality filters, then **automatic enrichment handoff** (`EnrichmentRun` linked via `discovery_run_id`).
+2. **DuckDuckGo HTML source adapter** — requests + retries + rate limits against `https://html.duckduckgo.com/html/`.
+3. **Result parsing** — extract result links/titles/snippets and decode DDG redirect links via the `uddg` URL parameter.
+4. **Normalization** — phone, URL, city/state formatting.
+5. **Deduplication** — exact website domain, exact phone, fuzzy name + city; prefers richer records (`dedupe.py` + in-run indexes for scale).
+6. **Validation** — quality filters, then **automatic enrichment handoff** (`EnrichmentRun` linked via `discovery_run_id`).
 
 Live UI:
 - Metrics: total found, duplicates removed, valid leads, per-source counts (from backend counters + `discovery_events`).
@@ -20,24 +19,17 @@ Live UI:
 
 ### Lead Discovery environment variables
 
-**Defaults:** Yelp + Yellow Pages scrapers ON, OSM fallback ON, Google Places + Yelp Fusion API OFF (opt-in).
+**Defaults:** DuckDuckGo HTML source ON (single-provider runtime).
 
-- `DISCOVERY_ENABLE_YELP_DIRECTORY=true`
-- `DISCOVERY_ENABLE_YELLOWPAGES_DIRECTORY=true`
-- `DISCOVERY_ENABLE_OSM_FALLBACK=true`
-- `DISCOVERY_YELP_MAX_PAGES=5` (pagination depth per query)
-- `DISCOVERY_YELLOWPAGES_MAX_PAGES=5`
+- `DISCOVERY_ENABLE_DUCKDUCKGO_HTML=true`
+- `DISCOVERY_DUCKDUCKGO_HTML_URL=https://html.duckduckgo.com/html/`
+- `DISCOVERY_DUCKDUCKGO_USER_AGENT=lead-enrichment-local/1.0 (+duckduckgo-discovery)`
+- `DISCOVERY_DUCKDUCKGO_MIN_INTERVAL_SECONDS=0.35`
+- `DISCOVERY_DUCKDUCKGO_MAX_RESULTS_PER_QUERY=12`
 - `DISCOVERY_PARALLEL_WORKERS=3`
 - `DISCOVERY_BATCH_COMMIT_SIZE=150`
-- `DISCOVERY_OSM_USER_AGENT=lead-enrichment-local/1.0`
-- `DISCOVERY_YELP_MIN_INTERVAL_SECONDS`, `DISCOVERY_YELLOWPAGES_MIN_INTERVAL_SECONDS`, `DISCOVERY_OSM_MIN_INTERVAL_SECONDS`
 
-Optional paid APIs (not required):
-
-- `GOOGLE_PLACES_API_KEY` + `DISCOVERY_ENABLE_GOOGLE_PLACES=false`
-- `YELP_API_KEY` + `DISCOVERY_ENABLE_YELP_FUSION_API=false`
-
-**Limitations:** Yelp/YP may rate-limit or change HTML; respect their terms of use. Use conservative intervals; Playwright fallback helps with JS-heavy responses but is slower. Large runs (20k+) rely on batched commits and compact dedupe indexes — monitor disk and SQLite concurrency.
+**Limitations:** DuckDuckGo HTML responses can still change structure or apply rate limiting. Use conservative intervals and monitor discovery events for retry/fetch failures. Large runs (20k+) rely on batched commits and compact dedupe indexes — monitor disk and SQLite concurrency.
 
 ## New local model controls (no day-to-day `.env` edits)
 
@@ -179,7 +171,7 @@ Deterministic first:
 - `/runs/{id}` auto-refreshes during processing for live progress + per-row updates
 - `/api/runs/{id}/progress`: JSON feed used by live run view polling
 - `/leads/{id}`: original row, canonical row, analysis, provenance, debug trace
-- `/debug/health`: DB + Ollama + directory checks
+- `/debug/health`: DB + Ollama + runtime checks
 - `/debug/llm`: local manual Ollama test UI
 - `/models`: list/pull/create local Ollama models and presets
 

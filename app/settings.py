@@ -16,25 +16,12 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 20
     google_places_api_key: str = ""
     yelp_api_key: str = ""
-    # Directory scrapers (primary) — no search-engine scraping
-    discovery_enable_yelp_directory: bool = True
-    discovery_enable_yellowpages_directory: bool = True
-    discovery_enable_osm_fallback: bool = True
-    discovery_enable_google_places: bool = False
-    discovery_enable_yelp_fusion_api: bool = False
-    discovery_osm_user_agent: str = "lead-enrichment-local/1.0"
-    discovery_google_min_interval_seconds: float = 0.25
-    discovery_yelp_min_interval_seconds: float = 0.3
-    discovery_osm_min_interval_seconds: float = 1.1
-    discovery_yellowpages_min_interval_seconds: float = 1.0
-    discovery_yelp_max_pages: int = 5
-    discovery_yellowpages_max_pages: int = 5
-    discovery_yelp_fetch_detail: bool = True
-    discovery_yellowpages_fetch_detail: bool = True
-    discovery_yelp_detail_max_per_query: int = 25
-    discovery_yellowpages_detail_max_per_query: int = 25
-    discovery_yelp_use_playwright_fallback: bool = True
-    discovery_yellowpages_use_playwright_fallback: bool = True
+    # Lead discovery provider (canonical): DuckDuckGo HTML search
+    discovery_enable_duckduckgo_html: bool = True
+    discovery_duckduckgo_html_url: str = "https://html.duckduckgo.com/html/"
+    discovery_duckduckgo_user_agent: str = "lead-enrichment-local/1.0 (+duckduckgo-discovery)"
+    discovery_duckduckgo_min_interval_seconds: float = 0.35
+    discovery_duckduckgo_max_results_per_query: int = 12
     discovery_http_max_retries: int = 3
     discovery_retry_backoff_seconds: float = 1.5
     discovery_parallel_workers: int = 3

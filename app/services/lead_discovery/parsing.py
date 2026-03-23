@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlparse
 
 from app.models import DiscoveryLead
 from app.services.lead_discovery.types import DiscoveryQuery, NormalizedLead, ParsedLead, RawBusinessRecord
@@ -76,6 +77,22 @@ def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedL
             category=query.category,
             source=raw.source,
             source_ref=str(payload.get("listing_url") or ""),
+        )
+
+    if raw.source == "duckduckgo_html":
+        website = str(payload.get("url") or "").strip()
+        title = str(payload.get("title") or "").strip()
+        domain = (urlparse(website).netloc or "").replace("www.", "")
+        return ParsedLead(
+            company_name=title or domain,
+            address="",
+            city=str(payload.get("city") or query.city or "").strip(),
+            state=str(payload.get("state") or query.state or "").strip(),
+            phone="",
+            website=website,
+            category=query.category,
+            source=raw.source,
+            source_ref=website,
         )
 
     # OpenStreetMap / Nominatim

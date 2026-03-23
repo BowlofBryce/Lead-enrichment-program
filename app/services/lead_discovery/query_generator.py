@@ -18,7 +18,7 @@ NEARBY_STATE_CITIES: dict[str, list[str]] = {
     "WY": ["Cheyenne", "Casper", "Laramie"],
 }
 
-# Canonical business types → search keyword variants (directory queries, not web search engines).
+# Canonical business types → search keyword variants used to form discovery queries.
 BUSINESS_TYPE_KEYWORDS: list[tuple[str, list[str]]] = [
     ("MedSpa", ["med spa", "medical spa", "aesthetic clinic", "botox", "laser spa"]),
     ("Remodelers", ["home remodeler", "kitchen remodel", "bathroom remodel", "home renovation"]),
@@ -52,7 +52,7 @@ def _normalize_state(state: str) -> str:
 
 
 def _keyword_variants_for_category(category: str) -> list[str]:
-    """Return [display category] + synonym variants for structured directory queries."""
+    """Return [display category] + synonym variants for structured discovery queries."""
     raw = (category or "").strip()
     if not raw:
         return []
@@ -71,9 +71,9 @@ def _keyword_variants_for_category(category: str) -> list[str]:
 
 def _llm_query_expansion(categories: list[str], states: list[str], model_name: str | None = None) -> list[dict[str, str]]:
     prompt = (
-        "Generate up to 30 focused local-business directory-style search phrases for lead discovery. "
+        "Generate up to 30 focused local-business web search phrases for lead discovery. "
         "Return strict JSON with key `queries` where each item has category, city, state, keyword_variant, phrase. "
-        "keyword_variant is the short term used with Yelp/Yellow Pages (e.g. 'med spa'). "
+        "keyword_variant is the short term used in DuckDuckGo search (e.g. 'med spa'). "
         "Use realistic city/state pairs in Utah and nearby states.\n"
         f"categories={json.dumps(categories)}\n"
         f"states={json.dumps(states)}"
