@@ -118,6 +118,52 @@ class LeadDiscoveryTests(unittest.TestCase):
             self.assertGreaterEqual(len(process_calls), 1)
             self.assertEqual(process_calls, sorted(process_calls))
 
+    def test_full_pipeline_reconciles_if_incremental_enqueue_is_interrupted(self) -> None:
+        original_enqueue = pipeline._enqueue_discovery_lead_for_enrichment
+
+        def _broken_enqueue(db, run, lead):
+            enrichment = db.get(EnrichmentRun, run.enrichment_run_id) if run.enrichment_run_id else None
+            if enrichment is None:
+                enrichment = EnrichmentRun(
+                    filename=f"discovery_run_{run.id}.generated.csv",
+                    status="queued",
+                    total_rows=0,
+                    processed_rows=0,
+                    discovery_run_id=run.id,
+                )
+                db.add(enrichment)
+                db.flush()
+                run.enrichment_run_id = enrichment.id
+                run.enrichment_queued_count = 0
+            db.commit()
+            return enrichment
+
+        pipeline._enqueue_discovery_lead_for_enrichment = _broken_enqueue
+        try:
+            with self.Session() as db:
+                run = DiscoveryRun(
+                    status="queued",
+                    categories_json=json.dumps(["MedSpa"]),
+                    locations_json=json.dumps(["UT"]),
+                    use_llm_query_expansion=False,
+                    full_pipeline_mode=True,
+                    max_retries=1,
+                )
+                db.add(run)
+                db.commit()
+                process_discovery_run(db, run.id, auto_start_enrichment=False)
+                db.refresh(run)
+
+                self.assertEqual(run.status, "completed")
+                self.assertIsNotNone(run.enrichment_run_id)
+                enrichment = db.get(EnrichmentRun, run.enrichment_run_id)
+                self.assertIsNotNone(enrichment)
+                self.assertEqual(enrichment.total_rows, run.valid_count)
+                leads = db.query(Lead).filter(Lead.run_id == enrichment.id).count()
+                self.assertEqual(leads, run.valid_count)
+        finally:
+            pipeline._enqueue_discovery_lead_for_enrichment = original_enqueue
+
 
 if __name__ == "__main__":
     unittest.main()

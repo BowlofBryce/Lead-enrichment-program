@@ -329,6 +329,8 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
 
     if full_pipeline_mode and run.enrichment_run_id:
         enrichment_run = db.get(EnrichmentRun, run.enrichment_run_id)
+        if enrichment_run is not None:
+            _reconcile_full_pipeline_queue(db, run, enrichment_run)
     else:
         _emit(
             db,
@@ -426,6 +428,7 @@ def _enqueue_discovery_lead_for_enrichment(db: Session, run: DiscoveryRun, lead:
         )
 
     row = {
+        "discovery_lead_id": lead.id,
         "company_name": lead.company_name,
         "website": lead.website,
         "phone": lead.phone,
@@ -502,6 +505,7 @@ def _queue_enrichment_from_discovery(db: Session, run: DiscoveryRun) -> Enrichme
                 }
             )
         row = {
+            "discovery_lead_id": lead.id,
             "company_name": lead.company_name,
             "website": lead.website,
             "phone": lead.phone,
@@ -549,3 +553,88 @@ def _queue_enrichment_from_discovery(db: Session, run: DiscoveryRun) -> Enrichme
     )
     db.commit()
     return enrichment_run
+
+
+def _reconcile_full_pipeline_queue(db: Session, run: DiscoveryRun, enrichment_run: EnrichmentRun) -> None:
+    """Backfill missing valid discovery leads into an already-linked enrichment run.
+
+    Full pipeline mode usually enqueues each valid lead as it is discovered. If that incremental
+    enqueue path is interrupted, we reconcile at run completion so enrichment never depends on
+    that specific step succeeding.
+    """
+    existing_rows = db.query(Lead).filter(Lead.run_id == enrichment_run.id).all()
+    existing_discovery_ids: set[int] = set()
+    for row in existing_rows:
+        raw = json.loads(row.original_row_json or "{}")
+        discovery_lead_id = raw.get("discovery_lead_id")
+        if isinstance(discovery_lead_id, int):
+            existing_discovery_ids.add(discovery_lead_id)
+
+    valid_leads = (
+        db.query(DiscoveryLead)
+        .filter(DiscoveryLead.run_id == run.id, DiscoveryLead.status == "valid")
+        .order_by(DiscoveryLead.id)
+        .all()
+    )
+    missing = [lead for lead in valid_leads if lead.id not in existing_discovery_ids]
+    if not missing:
+        return
+
+    for lead in missing:
+        row = {
+            "discovery_lead_id": lead.id,
+            "company_name": lead.company_name,
+            "website": lead.website,
+            "phone": lead.phone,
+            "city": lead.city,
+            "state": lead.state,
+            "address": lead.address,
+            "discovery_source": lead.source,
+            "discovery_category": lead.category,
+            "discovery_run_id": run.id,
+        }
+        db.add(
+            Lead(
+                run_id=enrichment_run.id,
+                original_row_json=json.dumps(row),
+                original_company_name=lead.company_name,
+                original_website=lead.website,
+                original_city=lead.city,
+                original_state=lead.state,
+                original_phone=lead.phone,
+                original_address=lead.address,
+                enrichment_status="pending",
+            )
+        )
+
+    enrichment_run.total_rows += len(missing)
+    run.enrichment_queued_count = enrichment_run.total_rows
+    if enrichment_run.csv_diagnostic:
+        diag = enrichment_run.csv_diagnostic
+        diag.detected_row_count = enrichment_run.total_rows
+        preview_rows = json.loads(diag.preview_rows_json or "[]")
+        for lead in missing:
+            if len(preview_rows) >= 20:
+                break
+            preview_rows.append(
+                {
+                    "company_name": lead.company_name,
+                    "website": lead.website,
+                    "phone": lead.phone,
+                    "city": lead.city,
+                    "state": lead.state,
+                    "address": lead.address,
+                }
+            )
+        diag.preview_rows_json = json.dumps(preview_rows)
+
+    _emit(
+        db,
+        run,
+        stage="enrichment_handoff",
+        event_type="reconcile",
+        message=f"Recovered {len(missing)} missed leads for enrichment queue",
+        severity="warning",
+        payload={"recovered_count": len(missing), "enrichment_run_id": enrichment_run.id},
+    )
+    db.commit()
