@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from app.models import Lead
+import app.services.lead_row as lead_row_service
 from app.services.lead_row import CANONICAL_COLUMNS, analyze_row, canonicalize_row, pick_canonical_mapping
 
 EXPECTED_COLUMNS = CANONICAL_COLUMNS
@@ -116,16 +118,32 @@ def inspect_upload_csv(path: Path) -> CSVInspectionResult:
         df_no_header = pd.read_csv(path, dtype=str, keep_default_na=False, header=None)
         generated_headers = [f"column_{idx + 1}" for idx in range(df_no_header.shape[1])]
         df_no_header.columns = generated_headers
-        no_header_mapping, no_header_normalized_headers, _ = pick_canonical_mapping(generated_headers)
+        sample_rows = df_no_header.head(20).to_dict(orient="records")
+        inferred_headers = _infer_headers_from_values(generated_headers, sample_rows)
+        if inferred_headers:
+            renamed_headers: list[str] = []
+            seen: dict[str, int] = {}
+            for original in generated_headers:
+                proposed = inferred_headers.get(original, "").strip().lower()
+                if proposed and re.match(r"^[a-z][a-z0-9_]{1,40}$", proposed):
+                    count = seen.get(proposed, 0)
+                    seen[proposed] = count + 1
+                    renamed_headers.append(f"{proposed}_{count + 1}" if count else proposed)
+                else:
+                    renamed_headers.append(original)
+            df_no_header.columns = renamed_headers
+        no_header_mapping, no_header_normalized_headers, _ = pick_canonical_mapping([str(col) for col in df_no_header.columns])
         row_count_gain = len(df_no_header) - len(df)
         if row_count_gain > 0:
             df = df_no_header
-            original_headers = generated_headers
+            original_headers = [str(col) for col in df_no_header.columns]
             normalized_headers = no_header_normalized_headers
             mapping = no_header_mapping
             warnings.append(
                 "No recognizable CSV headers detected; treated first row as data and generated synthetic column names."
             )
+            if inferred_headers:
+                warnings.append("Inferred column names from sample values using LLM-assisted parsing.")
 
     if df.empty:
         warnings.append("CSV has zero rows after parsing.")
@@ -261,3 +279,31 @@ def export_leads_to_csv(rows: list[dict[str, Any]], output_path: Path) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def _infer_headers_from_values(headers: list[str], sample_rows: list[dict[str, Any]]) -> dict[str, str]:
+    prompt = (
+        "You are inferring CSV header names for unlabeled columns from sample values.\n"
+        "Return strict JSON with key 'header_names' mapping each original column key to a short snake_case header.\n"
+        "Allowed outputs should look like: company_name, phone, website, rating, address, city, state, category, notes.\n"
+        f"columns: {json.dumps(headers)}\n"
+        f"sample_rows: {json.dumps(sample_rows[:20])}\n"
+    )
+    result = lead_row_service.generate_json(prompt=prompt, retries=1, temperature=0, stage="csv_header_inference")
+    if not result.ok:
+        return {}
+    payload = result.data if isinstance(result.data, dict) else {}
+    raw_mapping = payload.get("header_names", {})
+    if not isinstance(raw_mapping, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    header_set = set(headers)
+    for key, value in raw_mapping.items():
+        key_name = str(key).strip()
+        if key_name not in header_set:
+            continue
+        candidate = str(value or "").strip().lower().replace(" ", "_")
+        candidate = re.sub(r"[^a-z0-9_]", "", candidate)
+        if candidate:
+            cleaned[key_name] = candidate
+    return cleaned
