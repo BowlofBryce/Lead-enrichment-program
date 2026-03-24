@@ -66,7 +66,7 @@ Website content:
 """.strip()
 
     result: OllamaResult = generate_json(prompt=prompt, retries=2, model=model_name, stage="business_classification")
-    resolved_model = model_name or settings.ollama_model
+    resolved_model = model_name or settings.default_enrichment_model or settings.ollama_model
     if not result.ok:
         return ClassificationResult(
             model_name=resolved_model,

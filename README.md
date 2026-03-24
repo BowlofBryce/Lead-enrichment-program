@@ -228,7 +228,7 @@ pip install -r requirements.txt
 playwright install chromium
 cp .env.example .env
 ollama serve
-ollama pull qwen3-coder:30b
+ollama pull qwen3:14b
 uvicorn app.main:app --reload
 ```
 
@@ -289,7 +289,7 @@ The resolver now rejects location-only queries (e.g. `Edgewood MD`) and requires
 - `DEFAULT_SCHEMA_INFERENCE_MODEL`
 - `DEFAULT_QUERY_GENERATION_MODEL`
 
-If your machine cannot handle 30B, choose smaller defaults (for example 8B/14B).
+Defaults are set to 14B/8B for better compatibility; use 30B only on stronger machines.
 
 ## macOS full terminal setup
 See `INSTALL.md` for a beginner-friendly, from-scratch setup guide.

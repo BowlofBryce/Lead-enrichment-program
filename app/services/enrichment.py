@@ -131,7 +131,7 @@ def process_run(db: Session, run_id: int) -> None:
     logger.info("enrichment.run.started", extra_fields={"run_id": run.id, "filename": run.filename})
     selected_model = (run.selected_model or "").strip()
     custom_instructions = (run.custom_instructions or "").strip()
-    model_to_use = selected_model or settings.ollama_model
+    model_to_use = selected_model or settings.default_enrichment_model or settings.ollama_model
     used_default_model = not bool(selected_model)
     if selected_model:
         try:
