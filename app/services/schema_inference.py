@@ -84,6 +84,52 @@ def _heuristic_role_for_header(header: str) -> str:
     return "secondary_context"
 
 
+def _sample_value_role_hint(values: list[str]) -> str:
+    non_empty = [v.strip() for v in values if str(v or "").strip()]
+    if not non_empty:
+        return "secondary_context"
+
+    business_tokens = {"llc", "inc", "ltd", "co", "company", "spa", "clinic", "med", "medical", "aesthetics"}
+    total = len(non_empty)
+    email_hits = sum(1 for v in non_empty if "@" in v and "." in v.split("@", 1)[-1])
+    website_hits = sum(1 for v in non_empty if str(v).lower().startswith(("http://", "https://", "www.")))
+    domain_hits = sum(
+        1
+        for v in non_empty
+        if re.match(r"^[a-z0-9][a-z0-9.-]+\.[a-z]{2,}$", str(v).lower().strip()) and " " not in str(v)
+    )
+    phone_hits = sum(1 for v in non_empty if len(re.sub(r"\D", "", v)) >= 10)
+    address_hits = sum(1 for v in non_empty if bool(re.search(r"\d", v)) and any(ch.isalpha() for ch in v) and " " in v)
+    state_hits = sum(1 for v in non_empty if re.match(r"^[A-Z]{2}$", v.strip()))
+    city_hits = sum(
+        1
+        for v in non_empty
+        if bool(re.match(r"^[A-Za-z][A-Za-z .'-]{2,}$", v))
+        and " " in v
+        and len(v.split()) <= 3
+        and not any(token in business_tokens for token in re.findall(r"[a-z]+", v.lower()))
+    )
+    numeric_hits = sum(1 for v in non_empty if bool(re.match(r"^\d+(\.\d+)?$", v.strip())))
+
+    if email_hits / total >= 0.6:
+        return "contact_email"
+    if website_hits / total >= 0.5:
+        return "website"
+    if domain_hits / total >= 0.6:
+        return "domain"
+    if phone_hits / total >= 0.6:
+        return "contact_phone"
+    if address_hits / total >= 0.6:
+        return "street_address"
+    if state_hits / total >= 0.6:
+        return "location_state"
+    if city_hits / total >= 0.6:
+        return "location_city"
+    if numeric_hits / total >= 0.8:
+        return "secondary_context"
+    return "primary_entity_name"
+
+
 def _default_transforms(role: str, header: str) -> list[str]:
     n = normalize_column_name(header)
     transforms = ["keep_as_is"]
@@ -107,7 +153,10 @@ def _default_transforms(role: str, header: str) -> list[str]:
 def _heuristic_plan(headers: list[str], normalized_headers: list[str], sample_rows: list[dict[str, Any]], custom_instructions: str) -> dict[str, Any]:
     semantic_column_roles: dict[str, dict[str, Any]] = {}
     for header in headers:
-        role = _heuristic_role_for_header(header)
+        header_role = _heuristic_role_for_header(header)
+        column_values = [str(row.get(header, "") or "") for row in sample_rows[:40] if isinstance(row, dict)]
+        value_role = _sample_value_role_hint(column_values)
+        role = value_role if header_role == "secondary_context" else header_role
         semantic_column_roles[header] = {
             "role": role,
             "confidence": 0.63,
@@ -363,3 +412,4 @@ def transform_row_with_plan(raw_row: dict[str, Any], plan: dict[str, Any]) -> di
         canonical["location_text"] = " ".join([p for p in [canonical["city"], canonical["state"]] if p]).strip()
 
     return {"canonical": canonical, "semantic_values": semantic_values}
+    business_tokens = {"llc", "inc", "ltd", "co", "company", "spa", "clinic", "med", "medical", "aesthetics"}
