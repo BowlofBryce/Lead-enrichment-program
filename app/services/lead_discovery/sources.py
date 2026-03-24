@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.services.lead_discovery.duckduckgo import DuckDuckGoHTMLSource
+from app.services.lead_discovery.brave import BraveSearchSource
 from app.services.lead_discovery.types import DiscoveryQuery, RawBusinessRecord
 from app.settings import settings
 
@@ -16,15 +16,15 @@ class SourceAdapter(Protocol):
 
 # Priority when merging parallel fetch results.
 SOURCE_MERGE_ORDER: tuple[str, ...] = (
-    "duckduckgo_html",
+    "brave_search",
 )
 
 
 def build_enabled_sources() -> list[SourceAdapter]:
-    """DuckDuckGo HTML search is the canonical and only active discovery source."""
-    if not settings.discovery_enable_duckduckgo_html or not settings.duckduckgo_enabled:
+    provider = settings.discovery_provider.lower().strip()
+    if provider != "brave":
         return []
-    return [DuckDuckGoHTMLSource()]
+    return [BraveSearchSource()]
 
 
 def merge_order_index(name: str) -> int:

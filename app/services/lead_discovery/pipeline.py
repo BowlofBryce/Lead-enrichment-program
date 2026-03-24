@@ -59,8 +59,8 @@ def _retry_fetch(source: SourceAdapter, query: DiscoveryQuery, retries: int):
 
 def _human_message_for_source(source_name: str, query: DiscoveryQuery) -> str:
     kw = query.keyword_variant or query.category
-    if source_name == "duckduckgo_html":
-        return f"DuckDuckGo HTML search for '{kw} in {query.city}, {query.state}'"
+    if source_name == "brave_search":
+        return f"Brave Search API query for '{kw} in {query.city}, {query.state}'"
     return f"Fetching {source_name} for '{query.query}'"
 
 
@@ -140,7 +140,7 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
     sources = build_enabled_sources()
     if not sources:
         run.status = "failed"
-        run.error_message = "No lead-discovery source enabled. Enable DuckDuckGo HTML discovery in settings."
+        run.error_message = "No lead-discovery source enabled. Set DISCOVERY_PROVIDER=brave and configure Brave API settings."
         _emit(db, run, stage="source_fetching", event_type="error", message=run.error_message, severity="error")
         db.commit()
         return
@@ -203,6 +203,22 @@ def process_discovery_run(db: Session, run_id: int, *, auto_start_enrichment: bo
                 message=f"{sname} failed: {err}",
                 severity="warning",
             )
+
+        if source_errors and len(source_errors) == len(sources):
+            run.status = "failed"
+            run.error_message = f"Discovery query failed for all providers: {source_errors}"
+            _emit(
+                db,
+                run,
+                stage="source_fetching",
+                event_type="error",
+                message=run.error_message,
+                severity="error",
+                payload={"query": query.query, "errors": source_errors},
+            )
+            db.commit()
+            return
+
         db.commit()
 
         ordered_names = sorted(source_results.keys(), key=merge_order_index)

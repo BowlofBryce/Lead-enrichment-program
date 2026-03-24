@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
 from typing import Any
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
+from app.services.brave_search import BraveSearchClient, BraveSearchError
 from app.services.crawl import _fetch_with_playwright
 from app.services.query_generation import generate_queries_if_needed
 from app.services.lead_row import CanonicalLeadRow
@@ -159,40 +158,6 @@ def _legacy_search_queries(canonical: CanonicalLeadRow, custom_instructions: str
     return deduped[:3]
 
 
-def _parse_duckduckgo_results(html: str) -> list[dict[str, str]]:
-    soup = BeautifulSoup(html, "html.parser")
-    out: list[dict[str, str]] = []
-    for a in soup.select("a.result__a"):
-        href = _unwrap_search_result_url(a.get("href", "").strip())
-        title = a.get_text(" ", strip=True)
-        if href:
-            out.append({"url": href, "title": title})
-    if out:
-        return out
-
-    for result in soup.select(".result"):
-        link = result.find("a", href=True)
-        if not link:
-            continue
-        href = _unwrap_search_result_url(link.get("href", "").strip())
-        title = link.get_text(" ", strip=True)
-        if href:
-            out.append({"url": href, "title": title})
-    return out
-
-
-def _unwrap_search_result_url(url: str) -> str:
-    if not url:
-        return ""
-    parsed = urlparse(url)
-    if "duckduckgo.com" in parsed.netloc and parsed.path.startswith("/l/"):
-        qs = parse_qs(parsed.query)
-        raw = qs.get("uddg", [""])[0]
-        if raw:
-            return unquote(raw)
-    return url
-
-
 def _has_suspicious_existing_anchor(canonical: CanonicalLeadRow) -> bool:
     existing_domain = normalize_domain(canonical.website or canonical.company_domain)
     if not existing_domain:
@@ -224,46 +189,43 @@ def search_company_candidates(
     candidates: dict[str, ResolutionCandidate] = {}
     trace.append({"stage": "resolution.query_generation", "status": "ok", "message": query_note, "details": query_notes})
 
-    headers = {"User-Agent": "LeadEnrichmentLocal/1.0 (+company-resolution)"}
+    brave = BraveSearchClient()
     for query in queries:
         ql = query.lower()
         if not canonical.company_name or canonical.company_name.lower() not in ql:
-            trace.append({"stage": "resolution.search", "status": "skipped", "query": query, "reason": "missing_entity_name"})
+            trace.append({"stage": "resolution.search", "provider": "brave", "status": "skipped", "query": query, "reason": "missing_entity_name"})
             continue
         if _is_location_only_query(query):
-            trace.append({"stage": "resolution.search", "status": "skipped", "query": query, "reason": "location_only_query"})
+            trace.append({"stage": "resolution.search", "provider": "brave", "status": "skipped", "query": query, "reason": "location_only_query"})
             continue
-        encoded = quote_plus(query)
-        url = f"https://duckduckgo.com/html/?q={encoded}"
-        trace.append({"stage": "resolution.search", "status": "start", "query": query, "url": url})
-        html = ""
-        try:
-            resp = requests.get(url, headers=headers, timeout=settings.request_timeout_seconds)
-            resp.raise_for_status()
-            html = resp.text
-            fetch_method = "requests"
-        except Exception as req_exc:
-            trace.append({"stage": "resolution.search", "status": "requests_failed", "query": query, "error": str(req_exc)})
-            try:
-                html, _, _ = _fetch_with_playwright(url)
-                fetch_method = "playwright"
-            except Exception as pw_exc:
-                trace.append({"stage": "resolution.search", "status": "failed", "query": query, "error": str(pw_exc)})
-                continue
 
-        parsed = _parse_duckduckgo_results(html)
+        trace.append({"stage": "resolution.search", "provider": "brave", "status": "start", "query": query})
+        try:
+            parsed = brave.search_web(query)
+        except BraveSearchError as exc:
+            trace.append(
+                {
+                    "stage": "resolution.search",
+                    "provider": "brave",
+                    "status": "failed",
+                    "query": query,
+                    "error": str(exc),
+                }
+            )
+            continue
+
         trace.append(
             {
                 "stage": "resolution.search",
+                "provider": "brave",
                 "status": "ok",
                 "query": query,
-                "fetch_method": fetch_method,
                 "result_count": len(parsed),
             }
         )
 
         for item in parsed[:max_results]:
-            website = normalize_url(item["url"])
+            website = normalize_url(item.url)
             domain = normalize_domain(website)
             if not domain:
                 continue
@@ -273,12 +235,12 @@ def search_company_candidates(
                     website=website,
                     domain=domain,
                     source="search",
-                    evidence={"search_titles": [item.get("title", "")], "queries": [query]},
+                    evidence={"search_titles": [item.title], "queries": [query], "descriptions": [item.description]},
                 )
             else:
-                existing.evidence.setdefault("search_titles", []).append(item.get("title", ""))
+                existing.evidence.setdefault("search_titles", []).append(item.title)
                 existing.evidence.setdefault("queries", []).append(query)
-        time.sleep(0.35)
+                existing.evidence.setdefault("descriptions", []).append(item.description)
 
     return list(candidates.values())[:max_results], queries, trace, query_note
 

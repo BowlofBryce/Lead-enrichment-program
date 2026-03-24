@@ -99,7 +99,7 @@ def _llm_query_expansion(categories: list[str], states: list[str], model_name: s
     prompt = (
         "Generate up to 30 focused local-business web search phrases for lead discovery. "
         "Return strict JSON with key `queries` where each item has category, city, state, keyword_variant, phrase. "
-        "keyword_variant is the short term used in DuckDuckGo search (e.g. 'med spa'). "
+        "keyword_variant is the short term used in web search (e.g. 'med spa'). "
         "Use realistic city/state pairs in Utah and nearby states.\n"
         f"categories={json.dumps(categories)}\n"
         f"states={json.dumps(states)}"
