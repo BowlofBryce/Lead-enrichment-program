@@ -17,21 +17,20 @@ class Settings(BaseSettings):
     request_timeout_seconds: int = 20
     google_places_api_key: str = ""
     yelp_api_key: str = ""
-    # Lead discovery provider (canonical): DuckDuckGo HTML search
-    duckduckgo_enabled: bool = True
+
+    # Lead discovery provider configuration
+    discovery_provider: str = "brave"
+    brave_search_api_key: str = ""
+    brave_search_base_url: str = "https://api.search.brave.com/res/v1"
+    brave_search_timeout_seconds: int = Field(default=15, gt=0)
+    brave_search_max_results_per_query: int = Field(default=12, ge=1, le=20)
+    brave_search_country: str = "us"
+    brave_search_search_lang: str = "en"
+    brave_search_freshness: str = ""
+    brave_search_max_retries: int = Field(default=2, ge=0, le=5)
+
     max_queries_per_location: int = 2
     discovery_enable_explicit_medspa_synonyms: bool = False
-    discovery_enable_duckduckgo_html: bool = True
-    discovery_duckduckgo_html_url: str = "https://html.duckduckgo.com/html/"
-    discovery_duckduckgo_user_agent: str = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-    duckduckgo_min_delay_seconds: float = 5.0
-    duckduckgo_max_delay_seconds: float = 12.0
-    duckduckgo_consecutive_403_threshold: int = 2
-    discovery_duckduckgo_min_interval_seconds: float = 0.35
-    discovery_duckduckgo_max_results_per_query: int = 12
     discovery_http_max_retries: int = 3
     discovery_retry_backoff_seconds: float = 1.5
     discovery_parallel_workers: int = 3

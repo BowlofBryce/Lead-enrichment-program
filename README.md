@@ -4,11 +4,11 @@ Local-first FastAPI + Jinja2 + SQLite lead row enrichment for Apollo-like CSV ex
 
 ## Lead Discovery module
 
-Pipeline at `/discovery` uses **DuckDuckGo HTML web search** as the canonical discovery provider:
+Pipeline at `/discovery` uses **Brave Search API** as the canonical discovery provider:
 
 1. **Structured query generation** — categories × keyword variants × cities × states (Utah + nearby states), plus optional local LLM expansion (Ollama).
-2. **DuckDuckGo HTML source adapter** — requests + retries + rate limits against `https://html.duckduckgo.com/html/`.
-3. **Result parsing** — extract result links/titles/snippets and decode DDG redirect links via the `uddg` URL parameter.
+2. **Brave Search source adapter** — authenticated API requests with retry/backoff for rate limits against `https://api.search.brave.com/res/v1/web/search`.
+3. **Result normalization** — map Brave response objects into internal discovery records (`title`, `url`, `snippet`, `provider`).
 4. **Normalization** — phone, URL, city/state formatting.
 5. **Deduplication** — exact website domain, exact phone, fuzzy name + city; prefers richer records (`dedupe.py` + in-run indexes for scale).
 6. **Validation** — quality filters, then **automatic enrichment handoff** (`EnrichmentRun` linked via `discovery_run_id`).
@@ -19,17 +19,21 @@ Live UI:
 
 ### Lead Discovery environment variables
 
-**Defaults:** DuckDuckGo HTML source ON (single-provider runtime).
+**Defaults:** Brave source ON (single-provider runtime).
 
-- `DISCOVERY_ENABLE_DUCKDUCKGO_HTML=true`
-- `DISCOVERY_DUCKDUCKGO_HTML_URL=https://html.duckduckgo.com/html/`
-- `DISCOVERY_DUCKDUCKGO_USER_AGENT=lead-enrichment-local/1.0 (+duckduckgo-discovery)`
-- `DISCOVERY_DUCKDUCKGO_MIN_INTERVAL_SECONDS=0.35`
-- `DISCOVERY_DUCKDUCKGO_MAX_RESULTS_PER_QUERY=12`
+- `DISCOVERY_PROVIDER=brave`
+- `BRAVE_SEARCH_API_KEY=...`
+- `BRAVE_SEARCH_BASE_URL=https://api.search.brave.com/res/v1`
+- `BRAVE_SEARCH_TIMEOUT_SECONDS=15`
+- `BRAVE_SEARCH_MAX_RESULTS_PER_QUERY=12`
+- `BRAVE_SEARCH_COUNTRY=us`
+- `BRAVE_SEARCH_SEARCH_LANG=en`
+- `BRAVE_SEARCH_FRESHNESS=`
+- `BRAVE_SEARCH_MAX_RETRIES=2`
 - `DISCOVERY_PARALLEL_WORKERS=3`
 - `DISCOVERY_BATCH_COMMIT_SIZE=150`
 
-**Limitations:** DuckDuckGo HTML responses can still change structure or apply rate limiting. Use conservative intervals and monitor discovery events for retry/fetch failures. Large runs (20k+) rely on batched commits and compact dedupe indexes — monitor disk and SQLite concurrency.
+**Limitations:** Brave API can return 429 under load; discovery now retries with exponential backoff and fails loudly if retries are exhausted. Large runs (20k+) rely on batched commits and compact dedupe indexes — monitor disk and SQLite concurrency.
 
 ## New local model controls (no day-to-day `.env` edits)
 
@@ -110,7 +114,7 @@ Company/site enrichment fields:
 Before crawl/enrichment, rows missing website/domain go through deterministic resolution:
 1. Short-circuit: skip if strong existing anchor already exists.
 2. Email derivation: use non-generic email domain when available.
-3. Public web search (DuckDuckGo HTML): query company + city/state (+address if present).
+3. Public web search (Brave Search API): query company + city/state (+address if present).
 4. Candidate validation: fetch candidate pages with `requests` and Playwright fallback.
 5. Deterministic scoring and conservative selection.
 

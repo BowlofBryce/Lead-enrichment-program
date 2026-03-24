@@ -79,7 +79,7 @@ def parse_raw_business(raw: RawBusinessRecord, query: DiscoveryQuery) -> ParsedL
             source_ref=str(payload.get("listing_url") or ""),
         )
 
-    if raw.source == "duckduckgo_html":
+    if raw.source == "brave_search":
         website = str(payload.get("url") or "").strip()
         title = str(payload.get("title") or "").strip()
         domain = (urlparse(website).netloc or "").replace("www.", "")
