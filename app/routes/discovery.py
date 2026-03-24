@@ -5,16 +5,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_db
 from app.models import DiscoveryEvent, DiscoveryRun
 from app.services.lead_discovery.pipeline import process_discovery_run
+from app.template_engine import templates
 
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _run_discovery_bg(run_id: int) -> None:

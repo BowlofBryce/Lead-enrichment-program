@@ -9,7 +9,6 @@ from urllib.parse import quote_plus
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,10 +20,10 @@ from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
 from app.services.ollama_client import check_ollama_health, create_model_preset, generate, list_models, pull_model
 from app.settings import settings
+from app.template_engine import templates
 
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 logger = get_logger(__name__)
 
 
