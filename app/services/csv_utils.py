@@ -95,6 +95,38 @@ def inspect_upload_csv(path: Path) -> CSVInspectionResult:
     original_headers = [str(col) for col in df.columns]
     mapping, normalized_headers, warnings = pick_canonical_mapping(original_headers)
 
+    recognized_anchor_columns = {
+        "company_name",
+        "website",
+        "company_domain",
+        "email",
+        "phone",
+        "full_name",
+        "first_name",
+        "last_name",
+    }
+
+    should_retry_without_header = (
+        bool(original_headers)
+        and df.shape[1] > 1
+        and not any(mapping.get(col) for col in recognized_anchor_columns)
+    )
+
+    if should_retry_without_header:
+        df_no_header = pd.read_csv(path, dtype=str, keep_default_na=False, header=None)
+        generated_headers = [f"column_{idx + 1}" for idx in range(df_no_header.shape[1])]
+        df_no_header.columns = generated_headers
+        no_header_mapping, no_header_normalized_headers, _ = pick_canonical_mapping(generated_headers)
+        row_count_gain = len(df_no_header) - len(df)
+        if row_count_gain > 0:
+            df = df_no_header
+            original_headers = generated_headers
+            normalized_headers = no_header_normalized_headers
+            mapping = no_header_mapping
+            warnings.append(
+                "No recognizable CSV headers detected; treated first row as data and generated synthetic column names."
+            )
+
     if df.empty:
         warnings.append("CSV has zero rows after parsing.")
 
