@@ -52,7 +52,7 @@ def _run_in_background(run_id: int) -> None:
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     runs = db.query(EnrichmentRun).order_by(EnrichmentRun.created_at.desc()).limit(20).all()
-    return templates.TemplateResponse("index.html", {"request": request, "runs": runs, "debug_mode": settings.debug_mode})
+    return templates.TemplateResponse(request, "index.html", {"request": request, "runs": runs, "debug_mode": settings.debug_mode})
 
 
 @router.post("/upload")
@@ -127,6 +127,7 @@ def run_preview(request: Request, run_id: int, db: Session = Depends(get_db)):
     mapping = _json_obj(diagnostic.header_mapping_json)
     models_state = _load_models_state()
     return templates.TemplateResponse(
+        request,
         "csv_preview.html",
         {
             "request": request,
@@ -269,6 +270,7 @@ def run_detail(request: Request, run_id: int, db: Session = Depends(get_db)):
     resolved_model = run.selected_model or settings.default_enrichment_model or settings.ollama_model
     models_state = _load_models_state()
     return templates.TemplateResponse(
+        request,
         "run_detail.html",
         {
             "request": request,
@@ -479,6 +481,7 @@ def lead_detail(request: Request, lead_id: int, db: Session = Depends(get_db)):
             "ollama_parse_error": classification.ollama_parse_error or "",
         }
     return templates.TemplateResponse(
+        request,
         "lead_detail.html",
         {
             "request": request,
@@ -507,6 +510,7 @@ def completed_leads_page(request: Request, db: Session = Depends(get_db)):
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "completed_leads.html",
         {
             "request": request,
@@ -546,6 +550,7 @@ def models_page(request: Request):
     flash_message = request.query_params.get("message", "")
     flash_error = request.query_params.get("error", "")
     return templates.TemplateResponse(
+        request,
         "models.html",
         {
             "request": request,
@@ -620,6 +625,7 @@ def create_preset_route(
 @router.get("/debug/llm")
 def llm_debug_page(request: Request):
     return templates.TemplateResponse(
+        request,
         "debug_llm.html",
         {
             "request": request,
@@ -677,6 +683,7 @@ def llm_debug_test(
             "timed_out": reply.error == "ollama_timeout",
         }
     return templates.TemplateResponse(
+        request,
         "debug_llm.html",
         {
             "request": request,
@@ -728,6 +735,7 @@ def enrichment_debug_page(
             "final_scored_result": _json_obj(lead.semantic_row_json),
         }
     return templates.TemplateResponse(
+        request,
         "debug_enrichment.html",
         {"request": request, "lead": lead, "payload": payload, "run_id": run_id or "", "lead_id": lead_id or ""},
     )
@@ -760,6 +768,7 @@ def health_page(request: Request, db: Session = Depends(get_db)):
     timeout_config = get_ollama_timeout_config(db)
 
     return templates.TemplateResponse(
+        request,
         "debug_health.html",
         {
             "request": request,
