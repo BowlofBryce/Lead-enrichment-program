@@ -5,16 +5,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_db
 from app.models import DiscoveryEvent, DiscoveryRun
 from app.services.lead_discovery.pipeline import process_discovery_run
+from app.template_engine import templates
 
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _run_discovery_bg(run_id: int) -> None:
@@ -30,7 +29,7 @@ def _run_discovery_bg(run_id: int) -> None:
 @router.get("/discovery")
 def discovery_home(request: Request, db: Session = Depends(get_db)):
     runs = db.query(DiscoveryRun).order_by(DiscoveryRun.created_at.desc()).limit(20).all()
-    return templates.TemplateResponse("discovery_index.html", {"request": request, "runs": runs})
+    return templates.TemplateResponse(request, "discovery_index.html", {"request": request, "runs": runs})
 
 
 @router.post("/discovery/start")
@@ -68,7 +67,7 @@ def discovery_detail(run_id: int, request: Request, db: Session = Depends(get_db
     run = db.get(DiscoveryRun, run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Discovery run not found")
-    return templates.TemplateResponse("discovery_run_detail.html", {"request": request, "run": run})
+    return templates.TemplateResponse(request, "discovery_run_detail.html", {"request": request, "run": run})
 
 
 @router.post("/discovery/runs/{run_id}/pause")
