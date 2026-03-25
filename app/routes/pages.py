@@ -14,7 +14,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import SessionLocal, get_db
 from app.models import CSVParseDiagnostic, EnrichmentRun, EnrichmentRunEvent, Lead, LeadDebugEvent
-from app.services.app_config import get_ollama_timeout_config, set_ollama_timeout_seconds
+from app.services.app_config import (
+    get_brave_settings_config,
+    get_ollama_timeout_config,
+    set_brave_settings,
+    set_ollama_timeout_seconds,
+)
 from app.services.csv_utils import EXPECTED_COLUMNS, export_leads_to_csv, inspect_upload_csv, lead_to_export_row
 from app.services.enrichment import process_run
 from app.services.logging_utils import get_logger
@@ -565,6 +570,58 @@ def models_page(request: Request):
             "debug_mode": settings.debug_mode,
         },
     )
+
+
+@router.get("/settings")
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    brave_config = get_brave_settings_config(db)
+    flash_message = request.query_params.get("message", "")
+    flash_error = request.query_params.get("error", "")
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "request": request,
+            "flash_message": flash_message,
+            "flash_error": flash_error,
+            "config": brave_config,
+            "debug_mode": settings.debug_mode,
+        },
+    )
+
+
+@router.post("/settings/brave")
+def update_brave_settings(
+    discovery_provider: str = Form(default="brave"),
+    brave_search_api_key: str = Form(default=""),
+    brave_search_base_url: str = Form(default=""),
+    brave_search_timeout_seconds: str = Form(default="15"),
+    brave_search_max_results_per_query: str = Form(default="12"),
+    brave_search_country: str = Form(default="us"),
+    brave_search_search_lang: str = Form(default="en"),
+    brave_search_freshness: str = Form(default=""),
+    brave_search_max_retries: str = Form(default="2"),
+    db: Session = Depends(get_db),
+):
+    try:
+        set_brave_settings(
+            db,
+            {
+                "discovery_provider": discovery_provider,
+                "brave_search_api_key": brave_search_api_key,
+                "brave_search_base_url": brave_search_base_url,
+                "brave_search_timeout_seconds": brave_search_timeout_seconds,
+                "brave_search_max_results_per_query": brave_search_max_results_per_query,
+                "brave_search_country": brave_search_country,
+                "brave_search_search_lang": brave_search_search_lang,
+                "brave_search_freshness": brave_search_freshness,
+                "brave_search_max_retries": brave_search_max_retries,
+            },
+        )
+    except ValueError as exc:
+        return RedirectResponse(url=f"/settings?error={quote_plus(str(exc))}", status_code=303)
+    logger.info("settings.brave.updated", extra_fields={"provider": discovery_provider.lower().strip() or "brave"})
+    return RedirectResponse(url="/settings?message=Brave+settings+saved", status_code=303)
 
 
 @router.post("/settings/ollama-timeout")

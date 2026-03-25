@@ -233,13 +233,29 @@ button:hover, .button:hover { transform: translateY(-1px); }
 }
 
 .muted { color: var(--muted); }
-textarea, select, input[type="number"], input[type="text"], input[type="file"] {
+textarea, select, input[type="number"], input[type="text"], input[type="file"], input[type="password"] {
   width: 100%;
   margin: 6px 0 12px;
   border: 1px solid #cfd9ea;
   border-radius: 10px;
   padding: 0.55rem;
   background: #fff;
+}
+.alert {
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  margin: 0.7rem 0;
+  font-weight: 600;
+}
+.alert-success {
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+.alert-error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
 }
 
 .small { font-size: 0.85rem; color: var(--muted); margin-top: 8px; margin-bottom: 10px; }

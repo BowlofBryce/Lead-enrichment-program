@@ -12,8 +12,9 @@ from app.services.brave_search import (
 
 
 class BraveSearchClientTests(unittest.TestCase):
+    @patch("app.services.brave_search.get_brave_settings_config")
     @patch("app.services.brave_search.settings")
-    def test_missing_api_key_raises_configuration_error(self, mocked_settings: Mock) -> None:
+    def test_missing_api_key_raises_configuration_error(self, mocked_settings: Mock, mocked_config: Mock) -> None:
         mocked_settings.discovery_provider = "brave"
         mocked_settings.brave_search_api_key = ""
         mocked_settings.brave_search_base_url = "https://api.search.brave.com/res/v1"
@@ -23,14 +24,18 @@ class BraveSearchClientTests(unittest.TestCase):
         mocked_settings.brave_search_search_lang = "en"
         mocked_settings.brave_search_freshness = ""
         mocked_settings.brave_search_max_retries = 0
+        mocked_config.return_value = mocked_settings
 
         with self.assertRaises(BraveSearchConfigurationError):
             BraveSearchClient().search_web("med spa in Provo, UT")
 
+    @patch("app.services.brave_search.get_brave_settings_config")
     @patch("app.services.brave_search.time.sleep", return_value=None)
     @patch("app.services.brave_search.requests.get")
     @patch("app.services.brave_search.settings")
-    def test_rate_limit_retries_then_fails(self, mocked_settings: Mock, mocked_get: Mock, _mocked_sleep: Mock) -> None:
+    def test_rate_limit_retries_then_fails(
+        self, mocked_settings: Mock, mocked_get: Mock, _mocked_sleep: Mock, mocked_config: Mock
+    ) -> None:
         mocked_settings.discovery_provider = "brave"
         mocked_settings.brave_search_api_key = "token"
         mocked_settings.brave_search_base_url = "https://api.search.brave.com/res/v1"
@@ -40,6 +45,7 @@ class BraveSearchClientTests(unittest.TestCase):
         mocked_settings.brave_search_search_lang = "en"
         mocked_settings.brave_search_freshness = ""
         mocked_settings.brave_search_max_retries = 2
+        mocked_config.return_value = mocked_settings
 
         mocked_get.return_value = Mock(status_code=429)
 
@@ -47,9 +53,10 @@ class BraveSearchClientTests(unittest.TestCase):
             BraveSearchClient().search_web("medical spa near Orem Utah")
         self.assertEqual(mocked_get.call_count, 3)
 
+    @patch("app.services.brave_search.get_brave_settings_config")
     @patch("app.services.brave_search.requests.get")
     @patch("app.services.brave_search.settings")
-    def test_auth_failures_raise_explicit_error(self, mocked_settings: Mock, mocked_get: Mock) -> None:
+    def test_auth_failures_raise_explicit_error(self, mocked_settings: Mock, mocked_get: Mock, mocked_config: Mock) -> None:
         mocked_settings.discovery_provider = "brave"
         mocked_settings.brave_search_api_key = "token"
         mocked_settings.brave_search_base_url = "https://api.search.brave.com/res/v1"
@@ -59,6 +66,7 @@ class BraveSearchClientTests(unittest.TestCase):
         mocked_settings.brave_search_search_lang = "en"
         mocked_settings.brave_search_freshness = ""
         mocked_settings.brave_search_max_retries = 0
+        mocked_config.return_value = mocked_settings
 
         mocked_get.return_value = Mock(status_code=403)
 
