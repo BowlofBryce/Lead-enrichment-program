@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h2>Discovery Settings (Brave)</h2>
+  </div>
+  <p class="muted">Configure API keys and request behavior for Brave Search discovery runs.</p>
+
+  {% if flash_message %}
+    <div class="alert alert-success">{{ flash_message }}</div>
+  {% endif %}
+  {% if flash_error %}
+    <div class="alert alert-error">{{ flash_error }}</div>
+  {% endif %}
+
+  <form action="/settings/brave" method="post" class="upload-panel">
+    <label><strong>Discovery provider</strong></label>
+    <input type="text" name="discovery_provider" value="{{ config.discovery_provider }}" required>
+
+    <label><strong>Brave Search API key</strong></label>
+    <input type="password" name="brave_search_api_key" value="{{ config.brave_search_api_key }}" placeholder="BSA..." autocomplete="off">
+
+    <label><strong>Brave base URL</strong></label>
+    <input type="text" name="brave_search_base_url" value="{{ config.brave_search_base_url }}" required>
+
+    <label><strong>Timeout (seconds)</strong></label>
+    <input type="number" min="1" name="brave_search_timeout_seconds" value="{{ config.brave_search_timeout_seconds }}" required>
+
+    <label><strong>Max results per query</strong></label>
+    <input type="number" min="1" max="20" name="brave_search_max_results_per_query" value="{{ config.brave_search_max_results_per_query }}" required>
+
+    <label><strong>Country</strong></label>
+    <input type="text" name="brave_search_country" value="{{ config.brave_search_country }}" required>
+
+    <label><strong>Search language</strong></label>
+    <input type="text" name="brave_search_search_lang" value="{{ config.brave_search_search_lang }}" required>
+
+    <label><strong>Freshness (optional)</strong></label>
+    <input type="text" name="brave_search_freshness" value="{{ config.brave_search_freshness }}" placeholder="pd, pw, pm, py">
+
+    <label><strong>Max retries</strong></label>
+    <input type="number" min="0" max="5" name="brave_search_max_retries" value="{{ config.brave_search_max_retries }}" required>
+
+    <button type="submit">Save discovery settings</button>
+  </form>
+</section>
+{% endblock %}

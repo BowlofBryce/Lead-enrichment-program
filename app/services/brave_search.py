@@ -6,6 +6,7 @@ from typing import Any
 
 import requests
 
+from app.services.app_config import get_brave_settings_config
 from app.services.logging_utils import get_logger
 from app.settings import settings
 
@@ -47,17 +48,19 @@ class BraveSearchResult:
 
 class BraveSearchClient:
     def __init__(self) -> None:
-        self.base_url = settings.brave_search_base_url.rstrip("/")
-        self.api_key = settings.brave_search_api_key.strip()
-        self.timeout_seconds = settings.brave_search_timeout_seconds
-        self.max_results = settings.brave_search_max_results_per_query
-        self.country = settings.brave_search_country
-        self.search_lang = settings.brave_search_search_lang
-        self.freshness = settings.brave_search_freshness
-        self.max_retries = max(0, settings.brave_search_max_retries)
+        config = get_brave_settings_config()
+        self.discovery_provider = config.discovery_provider
+        self.base_url = config.brave_search_base_url.rstrip("/")
+        self.api_key = config.brave_search_api_key.strip()
+        self.timeout_seconds = config.brave_search_timeout_seconds
+        self.max_results = config.brave_search_max_results_per_query
+        self.country = config.brave_search_country
+        self.search_lang = config.brave_search_search_lang
+        self.freshness = config.brave_search_freshness
+        self.max_retries = max(0, config.brave_search_max_retries)
 
     def validate_configuration(self) -> None:
-        if settings.discovery_provider.lower() == "brave" and not self.api_key:
+        if self.discovery_provider.lower() == "brave" and not self.api_key:
             raise BraveSearchConfigurationError(
                 "BRAVE_SEARCH_API_KEY is required when DISCOVERY_PROVIDER=brave"
             )
